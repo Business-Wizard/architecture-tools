@@ -1,0 +1,14 @@
+[package]
+name = "my-app"
+version = "0.1.0"
+edition = "2024"
+description = "My app Rust implementation."
+license = "MIT"
+authors = ["Data Workspace Template"]
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
+
+[lints]
+workspace = true

@@ -1,0 +1,26 @@
+{
+    "recommendations": [
+        "aaron-bond.better-comments",
+        "davidanson.vscode-markdownlint",
+        "eamodio.gitlens",
+        "ms-azuretools.vscode-docker",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-vscode-remote.remote-containers",
+        "njpwerner.autodocstring",
+        "sourcery.sourcery",
+        "usernamehw.errorlens",
+        "vscode-icons-team.vscode-icons",
+        "visualjj.visualjj",
+        "pomdtr.excalidraw-editor",
+        "tamasfe.even-better-toml",
+        "tintinweb.graphviz-interactive-preview",
+        "ms-vsliveshare.vsliveshare",
+        "bierner.markdown-emoji",
+        "bierner.markdown-mermaid",
+        "jnoortheen.nix-ide",
+        "rust-lang.rust-analyzer",
+        "codeium.codeium",
+        "redhat.vscode-yaml",
+    ]
+}
