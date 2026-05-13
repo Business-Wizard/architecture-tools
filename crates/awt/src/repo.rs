@@ -5,9 +5,10 @@ use camino::Utf8PathBuf;
 use crate::model::DiscoveryError;
 
 pub fn resolve(repo_arg: Option<&Utf8PathBuf>) -> Result<PathBuf, DiscoveryError> {
-    let path = repo_arg
-        .map(|p| p.as_std_path().to_path_buf())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let path = repo_arg.map_or_else(
+        || std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        |p| p.as_std_path().to_path_buf(),
+    );
 
     if !path.exists() {
         let display =

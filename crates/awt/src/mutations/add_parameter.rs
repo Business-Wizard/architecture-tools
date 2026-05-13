@@ -39,7 +39,7 @@ fn build_insertion(params_src: &[u8], close_offset: usize) -> String {
 
     // If the param list has only `self`/`cls` or is empty, insert without leading comma.
     // Otherwise prepend a comma separator.
-    let needs_comma = trimmed.map_or(false, |&b| b != b'(');
+    let needs_comma = trimmed.is_some_and(|&b| b != b'(');
 
     if needs_comma {
         format!(", {PROBE_PARAM}")

@@ -39,10 +39,7 @@ fn parse_line(mutant_id: &MutantId, line: &str, repo_root: &Path) -> Option<Fail
     };
 
     // Split node_id from message: "tests/foo.py::bar - ExcType: msg"
-    let (node_id, message) = rest
-        .split_once(" - ")
-        .map(|(n, m)| (n, m))
-        .unwrap_or((rest, ""));
+    let (node_id, message) = rest.split_once(" - ").map_or((rest, ""), |(n, m)| (n, m));
 
     // Extract file from node_id (everything before first ::)
     let raw_file = node_id.split("::").next()?;

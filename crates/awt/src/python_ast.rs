@@ -24,6 +24,7 @@ impl ParsedFile {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct FunctionInfo {
     pub name: String,
     pub line: u32,
@@ -71,10 +72,10 @@ pub fn find_functions(parsed: &ParsedFile) -> Vec<FunctionInfo> {
 fn collect_functions(node: Node<'_>, source: &[u8], in_class: bool, out: &mut Vec<FunctionInfo>) {
     let kind = node.kind();
 
-    if kind == "function_definition" {
-        if let Some(info) = extract_function(node, source, in_class) {
-            out.push(info);
-        }
+    if kind == "function_definition"
+        && let Some(info) = extract_function(node, source, in_class)
+    {
+        out.push(info);
     }
 
     let descend_into_class = kind == "class_definition";
@@ -91,7 +92,7 @@ fn extract_function(node: Node<'_>, source: &[u8], in_class: bool) -> Option<Fun
     let name = name_node.utf8_text(source).ok()?.to_string();
 
     let params_node = node.child_by_field_name("parameters")?;
-    let line = node.start_position().row as u32;
+    let line = u32::try_from(node.start_position().row).unwrap_or(u32::MAX);
     let params_byte_start = params_node.start_byte();
     let params_byte_end = params_node.end_byte();
 
@@ -128,15 +129,14 @@ fn inspect_params(params_node: Node<'_>, source: &[u8]) -> (bool, bool, bool) {
     let mut cursor = params_node.walk();
     for child in params_node.children(&mut cursor) {
         match child.kind() {
-            "list_splat_pattern" | "*" => has_varargs = true,
+            "list_splat_pattern" | "*" | "keyword_separator" => has_varargs = true,
             "dictionary_splat_pattern" | "**" => has_kwargs = true,
             "default_parameter" | "typed_default_parameter" => has_defaults = true,
-            "keyword_separator" => has_varargs = true,
             _ => {
-                if let Ok(text) = child.utf8_text(source) {
-                    if text == "*" {
-                        has_varargs = true;
-                    }
+                if let Ok(text) = child.utf8_text(source)
+                    && text == "*"
+                {
+                    has_varargs = true;
                 }
             }
         }
@@ -149,9 +149,8 @@ fn inspect_decorators(func_node: Node<'_>, source: &[u8]) -> (bool, bool) {
     let mut has_overload = false;
     let mut has_property = false;
 
-    let parent = match func_node.parent() {
-        Some(p) => p,
-        None => return (false, false),
+    let Some(parent) = func_node.parent() else {
+        return (false, false);
     };
 
     let mut cursor = parent.walk();
@@ -183,7 +182,7 @@ fn collect_imports(node: Node<'_>, source: &[u8], out: &mut Vec<ImportInfo>) {
             let text = node.utf8_text(source).unwrap_or("").to_string();
             out.push(ImportInfo {
                 module_path: text,
-                line: node.start_position().row as u32,
+                line: u32::try_from(node.start_position().row).unwrap_or(u32::MAX),
                 byte_start: node.start_byte(),
                 byte_end: node.end_byte(),
             });

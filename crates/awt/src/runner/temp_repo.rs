@@ -25,7 +25,10 @@ impl TempRepo {
     }
 
     pub fn copy_from(repo_root: &Path) -> Result<Self, RunnerError> {
-        let dir = TempDir::new().map_err(|e| RunnerError::TempDir(e.to_string()))?;
+        let dir = tempfile::Builder::new()
+            .prefix("awt-mutant-")
+            .tempdir()
+            .map_err(|e| RunnerError::TempDir(e.to_string()))?;
         copy_tree(repo_root, dir.path())?;
         Ok(Self { dir })
     }

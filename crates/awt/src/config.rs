@@ -18,6 +18,7 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct OperatorConfig {
     pub add_required_parameter: bool,
     pub rename_parameter: bool,
@@ -63,14 +64,15 @@ impl Default for OperatorConfig {
 
 fn num_cpus() -> usize {
     std::thread::available_parallelism()
-        .map(|n| n.get())
+        .map(std::num::NonZero::get)
         .unwrap_or(4)
 }
 
 pub fn load(config_path: Option<&Utf8PathBuf>, repo_root: &Path) -> Result<Config, ConfigError> {
-    let candidate = config_path
-        .map(|p| p.as_std_path().to_path_buf())
-        .unwrap_or_else(|| repo_root.join("awt.toml"));
+    let candidate = config_path.map_or_else(
+        || repo_root.join("awt.toml"),
+        |p| p.as_std_path().to_path_buf(),
+    );
 
     if !candidate.exists() {
         return Ok(Config::default());

@@ -3,15 +3,18 @@ use clap::{Parser, Subcommand};
 use rayon::prelude::*;
 
 use crate::config;
-use crate::config::Config;
 use crate::discovery;
 use crate::failures::{basedpyright, pytest, ruff};
+use crate::graph::clustering;
+use crate::graph::coupling_graph::GraphIndex;
 use crate::model::{
     BaselineResult, Candidate, FailureCategory, FailureEvent, MutantResult, MutantStatus,
     VerifierKind, VerifierStatus,
 };
 use crate::mutations::add_parameter;
 use crate::repo;
+use crate::report::summary::{self, RunReport};
+use crate::report::terminal;
 use crate::runner::temp_repo::TempRepo;
 use crate::runner::verifier::VerifierSet;
 
@@ -63,11 +66,11 @@ pub struct RunArgs {
 pub fn run() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Run(args) => run_command(args),
+        Commands::Run(ref args) => run_command(args),
     }
 }
 
-fn run_command(args: RunArgs) {
+fn run_command(args: &RunArgs) {
     let repo_root = match repo::resolve(args.repo.as_ref()) {
         Ok(p) => p,
         Err(e) => {
@@ -96,22 +99,16 @@ fn run_command(args: RunArgs) {
 
     let verifiers = VerifierSet::new(cfg.timeout_secs);
 
-    println!("Baseline:");
     let baseline = run_baseline(&verifiers, &repo_root);
-    print_baseline(&baseline);
 
     if !baseline.all_pass() {
+        eprintln!("Baseline:");
+        print_baseline(&baseline);
         eprintln!("\nBaseline failed. Aborting.");
         std::process::exit(1);
     }
 
-    let discovery = match discovery::discover(&repo_root, &cfg) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("error during discovery: {e}");
-            std::process::exit(1);
-        }
-    };
+    let discovery = discovery::discover(&repo_root, &cfg);
 
     if args.dry_run {
         let c = &discovery.counts;
@@ -152,7 +149,35 @@ fn run_command(args: RunArgs) {
             .collect()
     });
 
-    print_mutation_summary(&results);
+    let graph_idx = GraphIndex::build(&results);
+    let cluster_result = clustering::analyse(&graph_idx);
+    terminal::print_report(&baseline, &results, &cluster_result);
+
+    let report = RunReport::build(&baseline, &results, &cluster_result);
+
+    if let Some(json_path) = &args.json_out {
+        match serde_json::to_string_pretty(&report) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(json_path.as_std_path(), json) {
+                    eprintln!("error writing json output: {e}");
+                }
+            }
+            Err(e) => eprintln!("error serialising report: {e}"),
+        }
+    }
+
+    if let Some(compare_path) = &args.compare {
+        match std::fs::read_to_string(compare_path.as_std_path()) {
+            Ok(raw) => match serde_json::from_str::<RunReport>(&raw) {
+                Ok(before) => {
+                    let delta = summary::compute_delta(&before, &report);
+                    summary::print_delta(&delta);
+                }
+                Err(e) => eprintln!("error parsing compare file: {e}"),
+            },
+            Err(e) => eprintln!("error reading compare file: {e}"),
+        }
+    }
 }
 
 fn run_mutant(
@@ -262,26 +287,6 @@ fn make_runner_failure(_file: &camino::Utf8PathBuf, msg: &str) -> FailureEvent {
     }
 }
 
-fn print_mutation_summary(results: &[MutantResult]) {
-    let breaks = results
-        .iter()
-        .filter(|r| r.status == MutantStatus::Breaks)
-        .count();
-    let survives = results
-        .iter()
-        .filter(|r| r.status == MutantStatus::Survives)
-        .count();
-    let invalid = results
-        .iter()
-        .filter(|r| r.status == MutantStatus::Invalid)
-        .count();
-
-    println!("\nMutation Summary:");
-    println!("  breaks:   {breaks}");
-    println!("  survives: {survives}");
-    println!("  invalid:  {invalid}");
-}
-
 fn run_baseline(verifiers: &VerifierSet, repo: &std::path::Path) -> BaselineResult {
     let ruff = verifiers
         .run_ruff(repo)
@@ -308,8 +313,17 @@ fn print_baseline(b: &BaselineResult) {
 fn print_verifier_status(name: &str, status: &VerifierStatus) {
     match status {
         VerifierStatus::Pass => println!("  {name}: pass"),
+        VerifierStatus::Fail(lines) if lines.is_empty() => {
+            println!("  {name}: FAIL (no output captured — verifier may not be installed)");
+        }
         VerifierStatus::Fail(lines) => {
             println!("  {name}: {} existing errors", lines.len());
+            for line in lines.iter().take(5) {
+                println!("    {line}");
+            }
+            if lines.len() > 5 {
+                println!("    … ({} more)", lines.len() - 5);
+            }
         }
     }
 }

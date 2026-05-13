@@ -3,7 +3,7 @@ use std::path::Path;
 use ignore::WalkBuilder;
 
 use crate::config::Config;
-use crate::model::{Candidate, CandidateKind, DiscoveryError, MutantId, OperatorKind};
+use crate::model::{Candidate, CandidateKind, MutantId, OperatorKind};
 use crate::python_ast::{self, ParsedFile};
 use crate::repo;
 
@@ -21,7 +21,7 @@ pub struct DiscoveryResult {
     pub counts: CandidateCounts,
 }
 
-pub fn discover(repo_root: &Path, cfg: &Config) -> Result<DiscoveryResult, DiscoveryError> {
+pub fn discover(repo_root: &Path, cfg: &Config) -> DiscoveryResult {
     let mut candidates = Vec::new();
     let mut counts = CandidateCounts::default();
 
@@ -45,14 +45,12 @@ pub fn discover(repo_root: &Path, cfg: &Config) -> Result<DiscoveryResult, Disco
             Err(_) => continue,
         };
 
-        let source = match std::fs::read(path) {
-            Ok(s) => s,
-            Err(_) => continue,
+        let Ok(source) = std::fs::read(path) else {
+            continue;
         };
 
-        let parsed = match ParsedFile::parse(&source) {
-            Some(p) => p,
-            None => continue,
+        let Some(parsed) = ParsedFile::parse(&source) else {
+            continue;
         };
 
         if cfg.operators.add_required_parameter {
@@ -117,5 +115,5 @@ pub fn discover(repo_root: &Path, cfg: &Config) -> Result<DiscoveryResult, Disco
         }
     }
 
-    Ok(DiscoveryResult { candidates, counts })
+    DiscoveryResult { candidates, counts }
 }

@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'out=$(prek -a 2>&1); rc=$?; [ $rc -eq 0 ] && exit 0; printf \"%s\" \"$out\" | head -c 8000; exit $rc'"
+            "command": "bash -c 'out=$(prek run -a 2>&1); rc=$?; [ $rc -eq 0 ] && exit 0; printf \"%s\" \"$out\" | head -c 8000; exit $rc'"
           }
         ]
       }
