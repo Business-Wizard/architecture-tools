@@ -1,0 +1,14 @@
+[package]
+name = "awt"
+version = "0.1.0"
+edition = "2024"
+description = "Architecture Wind Tunnel — mutation-based coupling analysis for Python codebases."
+license = "AGPL-3.0-or-later"
+authors = ["Better Bearings"]
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
+
+[lints]
+workspace = true
