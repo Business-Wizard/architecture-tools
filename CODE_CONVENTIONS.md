@@ -60,7 +60,7 @@ Examples: `feat(agents): add self-improving pattern`, `fix(cli): handle missing 
 **CRITICAL: Always use `jj` (Jujutsu), never use `git` directly.**
 
 - Never add "Co-Authored-By" lines to commit messages
-- Use `jj commit -m "message"` for commits
+- Use `jj describe -m "message" && jj new` for commits
 
 ### Architecture & Design Patterns
 
