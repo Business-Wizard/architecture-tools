@@ -13,6 +13,8 @@
           inherit system;
           config = { allowUnfree = true; };
         };
+        beads = pkgs.callPackage ./nix/beads.nix {};
+        loctree = pkgs.callPackage ./nix/loctree.nix {};
       in
       {
         devShells.default = pkgs.mkShell {
@@ -29,6 +31,8 @@
             docker
             podman
             jq
+            beads
+            dolt
           ];
         };
       }
