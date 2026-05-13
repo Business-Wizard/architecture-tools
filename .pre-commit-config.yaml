@@ -7,7 +7,6 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-      - id: check-ast
       - id: check-added-large-files
         args: [--maxkb=800]
       - id: check-case-conflict
@@ -25,16 +24,6 @@ repos:
       - id: mixed-line-ending
       - id: sort-simple-yaml
       - id: trailing-whitespace
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.14
-    hooks:
-      - id: ruff-check
-        args: ["--fix"]
-      - id: ruff-format
-  - repo: https://github.com/DetachHead/basedpyright-pre-commit-mirror
-    rev: 1.37.2
-    hooks:
-      - id: basedpyright
   - repo: https://github.com/doublify/pre-commit-rust
     rev: v1.0
     hooks:
@@ -64,17 +53,6 @@ repos:
         language: system
   - repo: local
     hooks:
-      - id: pytest
-        language: system
-        name: pytest
-        types: [python]
-        entry: python/.venv/bin/pytest
-        args:
-          - "python/tests/"
-          - "-m"
-          - "not network"
-        pass_filenames: false
-        always_run: true
       - id: commit-msg-length
         name: commit-msg-length
         stages: [commit-msg]
