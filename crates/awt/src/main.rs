@@ -1,9 +1,15 @@
-mod controller;
-mod domain;
-mod feature;
-mod presenter;
-mod view_model;
+mod cli;
+mod config;
+mod discovery;
+mod failures;
+mod graph;
+mod model;
+mod mutations;
+mod python_ast;
+mod repo;
+mod report;
+mod runner;
 
 fn main() {
-    println!("awt — Architecture Wind Tunnel (not yet implemented)");
+    cli::run();
 }
