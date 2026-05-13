@@ -51,7 +51,7 @@ prek
 Version control uses **jj (Jujutsu)**, never git directly:
 
 ```bash
-jj commit -m "feat(awt): add mutation discovery"
+jj describe -m "feat(awt): add mutation discovery" && jj new
 jj status
 jj log
 ```
@@ -185,3 +185,46 @@ Pre-commit hooks (`prek`) enforce: fmt, cargo check, clippy (fix then lint), con
 Required format: `(chore|test|feat|fix|fixup|drop|build|docs|refactor)!?(\([a-z]+\))?: message`
 
 Scopes to use: `awt`, `mutations`, `runner`, `graph`, `report`, `cli`, `config`
+
+
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
+## Beads Issue Tracker
+
+This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+
+### Quick Reference
+
+```bash
+bd ready              # Find available work
+bd show <id>          # View issue details
+bd update <id> --claim  # Claim work
+bd close <id>         # Complete work
+```
+
+### Rules
+
+- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
+- Run `bd prime` for detailed command reference and session close protocol
+- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+
+## Session Completion
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **Commit and push beads state** - This project uses `jj`, not `git`:
+   ```bash
+   bd dolt push
+   jj describe -m "chore: update beads task state" && jj new
+   ```
+5. **Update issue status** — Close finished work, update in-progress items
+6. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Use `jj commit` — never `git commit` or `git push`
+- Never push to remote without explicit user instruction (per project conventions)
+<!-- END BEADS INTEGRATION -->
