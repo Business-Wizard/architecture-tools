@@ -25,7 +25,6 @@
             uv
             cargo
             rustup
-            vscode
             claude-code
             claude-monitor
             docker
