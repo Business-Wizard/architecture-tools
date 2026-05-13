@@ -1,0 +1,67 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd prime"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // .tool_response.filePath // empty'); [[ -n \"$f\" ]] && cargo fmt -- \"$f\" 2>/dev/null || true",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Claude Code needs your attention\" with title \"Claude Code\"'"
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'out=$(prek -a 2>&1); rc=$?; [ $rc -eq 0 ] && exit 0; printf \"%s\" \"$out\" | head -c 8000; exit $rc'"
+          }
+        ]
+      }
+    ]
+  },
+  "autoMode": {
+    "environment": [
+      "Source control: jj (Jujutsu VCS). Commits are local-only and encouraged after each meaningful change. Code is never pushed to a remote.",
+      "Stack: Python 3.14, Rust",
+      "Trusted task runners: just, cargo, bd (beads task tracker), prek, jj.",
+      "No production access from Claude. Deploys are managed separately via the infra repo.",
+      "CI: No direct CI mutations from Claude."
+    ],
+    "allow": [
+      "Running jj commands (log, status, diff, commit, describe) is safe and encouraged.",
+      "Calling loctree MCP tools for code navigation is safe."
+    ],
+    "soft_deny": [
+      "Never push to any remote. All version control is local-only (jj commits merged locally, never pushed).",
+      "Never create, move, or delete jj bookmarks (branches) without explicit user instruction.",
+      "Never mutate immutable commits — commits that already exist in trunk/main are immutable and must not be amended, rebased onto, or squashed.",
+      "Never make HTTP POST/PUT/DELETE requests to external APIs.",
+      "Never run database migrations under any circumstances — not even via a CLI.",
+      "Never modify CI without explicit user instruction."
+    ]
+  }
+}
