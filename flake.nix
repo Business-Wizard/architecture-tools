@@ -19,7 +19,6 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            git
             jujutsu
             prek
             uv
