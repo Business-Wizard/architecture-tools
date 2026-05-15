@@ -14,3 +14,10 @@ dev = [
     "ruff>=0.1.0",
     "basedpyright>=1.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.39.4",
+    "pytest>=9.0.3",
+    "ruff>=0.15.13",
+]

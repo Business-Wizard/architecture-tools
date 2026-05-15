@@ -64,13 +64,18 @@ fn print_centers_section(clustering: &ClusteringResult) {
 
     println!("\n─── Top Centers of Gravity ──────────────────────────────");
     let mut table = Table::new();
-    table.set_header(vec!["File", "Prod affected", "Test affected", "Package"]);
+    table.set_header(vec![
+        "File",
+        "Source code affected",
+        "Test code affected",
+        "Package",
+    ]);
 
     for center in clustering.centers.iter().take(10) {
         table.add_row(vec![
             Cell::new(center.file.as_str()),
-            Cell::new(center.affected_prod.to_string()),
-            Cell::new(center.affected_test.to_string()),
+            Cell::new(center.affected_source_code.to_string()),
+            Cell::new(center.affected_test_code.to_string()),
             Cell::new(&center.top_package),
         ]);
     }

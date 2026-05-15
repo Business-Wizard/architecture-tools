@@ -9,8 +9,8 @@ use crate::graph::coupling_graph::GraphIndex;
 #[derive(Debug)]
 pub struct CenterOfGravity {
     pub file: Utf8PathBuf,
-    pub affected_prod: usize,
-    pub affected_test: usize,
+    pub affected_source_code: usize,
+    pub affected_test_code: usize,
     pub top_package: String,
 }
 
@@ -41,28 +41,29 @@ pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
             if edges.is_empty() {
                 return None;
             }
-            let mut prod = 0usize;
-            let mut test = 0usize;
+            let mut source_code = 0usize;
+            let mut test_code = 0usize;
             for e in &edges {
                 let target = &idx.graph[e.target()];
-                if target.is_test {
-                    test += 1;
+                if target.is_test_code {
+                    test_code += 1;
                 } else {
-                    prod += 1;
+                    source_code += 1;
                 }
             }
             let top_package = top_package(&node.path);
             Some(CenterOfGravity {
                 file: node.path.clone(),
-                affected_prod: prod,
-                affected_test: test,
+                affected_source_code: source_code,
+                affected_test_code: test_code,
                 top_package,
             })
         })
         .collect();
 
     centers.sort_by(|a, b| {
-        (b.affected_prod + b.affected_test).cmp(&(a.affected_prod + a.affected_test))
+        (b.affected_source_code + b.affected_test_code)
+            .cmp(&(a.affected_source_code + a.affected_test_code))
     });
 
     // Unexpected coupling: edge where source and target have different top-level packages
@@ -105,10 +106,10 @@ pub fn refactor_hints(centers: &[CenterOfGravity]) -> Vec<String> {
         .iter()
         .take(5)
         .map(|c| {
-            let total = c.affected_prod + c.affected_test;
+            let total = c.affected_source_code + c.affected_test_code;
             format!(
-                "{}: {} callers across {} prod + {} test files — consider extracting an interface",
-                c.file, total, c.affected_prod, c.affected_test
+                "{}: {} callers across {} source + {} test files — consider extracting an interface",
+                c.file, total, c.affected_source_code, c.affected_test_code
             )
         })
         .collect()

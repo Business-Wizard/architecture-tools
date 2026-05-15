@@ -8,7 +8,7 @@ use crate::model::MutantResult;
 #[derive(Debug, Clone)]
 pub struct CouplingNode {
     pub path: Utf8PathBuf,
-    pub is_test: bool,
+    pub is_test_code: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -34,10 +34,10 @@ impl GraphIndex {
             if let Some(&idx) = map.get(&path) {
                 return idx;
             }
-            let is_test = is_test_file(&path);
+            let is_test_code = is_test_file(&path);
             let idx = g.add_node(CouplingNode {
                 path: path.clone(),
-                is_test,
+                is_test_code,
             });
             map.insert(path, idx);
             idx
