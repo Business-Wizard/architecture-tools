@@ -47,12 +47,15 @@ repos:
             "--",
             "-D",
             "warnings",
-            "-A",
-            "clippy::all",
           ]
         language: system
   - repo: local
     hooks:
+      - id: cargo-test
+        name: cargo_test
+        language: system
+        entry: cargo test --workspace
+        pass_filenames: false
       - id: commit-msg-length
         name: commit-msg-length
         stages: [commit-msg]
