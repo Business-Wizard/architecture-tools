@@ -125,3 +125,102 @@ nix develop
 - **Faster builds**: `.cargo/config.toml` reuses `target/rust`, enables incremental builds, and lifts developer `codegen-units`, while Linux builds pass `-fuse-ld=mold` for quicker linking; install `mold` plus a compatible linker (e.g. `cc`) before enabling it in your environment.
 - **Profiles tuned for iteration & CI releases**: dev builds keep overflow checks on with high parallelism, release builds use thin-LTO/panic-abort defaults to keep iteration fast without sacrificing correctness.
 - **Getting started**: run `cargo run -p data_app` from the repo root to exercise the template; add additional members under `rust/` and the workspace `members` array as needed.
+
+## Architecture Wind Tunnel (AWT) Tool
+
+**Architecture Wind Tunnel** (`awt`) is a mutation-based coupling analysis tool for Python codebases. It mutates Python code (add/rename/remove parameters, remove imports/modules), runs verifiers in ephemeral temp directories, and aggregates what breaks into coupling clusters — revealing unexpected dependencies and refactor candidates.
+
+### Building AWT
+
+The project is already configured in your Nix shell. To build:
+
+```bash
+# Build the awt binary
+cargo build -p awt
+
+# Or run directly (builds if needed)
+cargo run -p awt --
+```
+
+### Using AWT
+
+Once built, the `awt` binary is available as:
+
+```bash
+# Run mutation analysis on a Python project
+./target/debug/awt run [OPTIONS] <PYTHON_PROJECT_PATH>
+
+# Or via cargo
+cargo run -p awt -- run [OPTIONS] <PYTHON_PROJECT_PATH>
+```
+
+### Configuration
+
+Create an `awt.toml` in your Python project root to configure the tool:
+
+```toml
+# Verifiers to run (at least one required)
+verifiers = ["ruff", "basedpyright", "pytest"]
+
+# Optional: mutation operators to apply
+operators = [
+  "add_required_parameter",
+  "remove_parameter",
+  "rename_parameter",
+  "remove_import",
+  "remove_module",
+]
+
+# Optional: maximum mutations to test
+max_mutations = 100
+```
+
+### Example Workflow
+
+```bash
+# Navigate to the architecture-tools repo
+cd /Users/josephwilson/repos/beach/architecture-tools
+
+# Build the tool
+cargo build -p awt
+
+# Run on a sample Python project
+./target/debug/awt run ../some-python-project/
+
+# The tool will:
+# 1. Load configuration from awt.toml
+# 2. Scan Python files with tree-sitter
+# 3. Generate mutation candidates
+# 4. Run baseline verifiers (ruff, basedpyright, pytest)
+# 5. Apply each mutation to a temp directory and test
+# 6. Generate a terminal report showing coupling clusters
+```
+
+### Output
+
+The tool produces:
+- **Terminal Report**: Coupling analysis showing which functions/modules are tightly coupled
+- **JSON Output** (optional): Machine-readable results for further analysis
+- **Delta Report**: Before/after comparison of what breaks with each mutation
+
+### Testing & Development
+
+```bash
+# Run all tests
+cargo test --workspace
+
+# Run specific test
+cargo test -p awt test_name_here
+
+# Type check
+cargo check --all-features --all-targets --workspace
+
+# Lint (auto-fix)
+cargo clippy --fix --all-features --allow-staged --allow-dirty
+
+# Format code
+cargo fmt --all
+
+# Pre-commit checks (fmt + check + clippy)
+prek
+```
