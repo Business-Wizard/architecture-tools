@@ -5,10 +5,16 @@ use petgraph::graph::{DiGraph, NodeIndex};
 
 use crate::model::MutantResult;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileRole {
+    Source,
+    Test,
+}
+
 #[derive(Debug, Clone)]
 pub struct CouplingNode {
     pub path: Utf8PathBuf,
-    pub is_test_code: bool,
+    pub role: FileRole,
 }
 
 #[derive(Debug, Clone)]
@@ -33,10 +39,14 @@ impl GraphIndex {
             if let Some(&idx) = map.get(&path) {
                 return idx;
             }
-            let is_test_code = is_test_file(&path);
+            let role = if is_test_file(&path) {
+                FileRole::Test
+            } else {
+                FileRole::Source
+            };
             let idx = g.add_node(CouplingNode {
                 path: path.clone(),
-                is_test_code,
+                role,
             });
             map.insert(path, idx);
             idx

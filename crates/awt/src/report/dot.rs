@@ -3,7 +3,7 @@ use std::io;
 
 use camino::Utf8Path;
 
-use crate::graph::coupling_graph::GraphIndex;
+use crate::graph::coupling_graph::{FileRole, GraphIndex};
 
 pub fn write_dot(idx: &GraphIndex, path: &Utf8Path) -> io::Result<()> {
     let dot = render(idx);
@@ -18,7 +18,7 @@ fn render(idx: &GraphIndex) -> String {
     for n in idx.graph.node_indices() {
         let node = &idx.graph[n];
         let label = node.path.as_str().replace('"', "\\\"");
-        let (shape, style) = if node.is_test_code {
+        let (shape, style) = if node.role == FileRole::Test {
             ("ellipse", " style=dashed")
         } else {
             ("box", "")
@@ -52,8 +52,8 @@ mod tests {
     use super::*;
     use crate::graph::coupling_graph::GraphIndex;
     use crate::model::{
-        Candidate, CandidateKind, FailureCategory, FailureEvent, MutantId, MutantResult,
-        MutantStatus, OperatorKind, VerifierKind,
+        Candidate, CandidateKind, FailureCategory, FailureEvent, FailureScope, MutantId,
+        MutantResult, MutantStatus, OperatorKind, VerifierKind,
     };
     use camino::Utf8PathBuf;
 
@@ -81,7 +81,7 @@ mod tests {
                 symbol: None,
                 category: FailureCategory::TestAssertion,
                 message: "fail".into(),
-                is_local: false,
+                scope: FailureScope::External,
             }],
         };
         GraphIndex::build(&[result])

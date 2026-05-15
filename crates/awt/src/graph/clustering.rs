@@ -2,7 +2,7 @@ use camino::Utf8PathBuf;
 use petgraph::algo::connected_components;
 use petgraph::visit::EdgeRef;
 
-use crate::graph::coupling_graph::GraphIndex;
+use crate::graph::coupling_graph::{FileRole, GraphIndex};
 
 #[derive(Debug)]
 pub struct CenterOfGravity {
@@ -42,7 +42,7 @@ pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
             let mut test_code = 0usize;
             for e in &edges {
                 let target = &idx.graph[e.target()];
-                if target.is_test_code {
+                if target.role == FileRole::Test {
                     test_code += 1;
                 } else {
                     source_code += 1;

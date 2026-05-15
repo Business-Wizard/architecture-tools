@@ -101,6 +101,12 @@ pub enum FailureCategory {
     Unknown,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FailureScope {
+    Local,
+    External,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailureEvent {
     pub mutant_id: MutantId,
@@ -111,7 +117,7 @@ pub struct FailureEvent {
     pub symbol: Option<String>,
     pub category: FailureCategory,
     pub message: String,
-    pub is_local: bool,
+    pub scope: FailureScope,
 }
 
 // ── Mutant result ─────────────────────────────────────────────────────────────

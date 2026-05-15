@@ -12,8 +12,8 @@ use crate::graph::clustering;
 use crate::graph::coupling_graph::GraphIndex;
 use crate::model::OperatorKind;
 use crate::model::{
-    BaselineResult, Candidate, FailureCategory, FailureEvent, MutantResult, MutantStatus,
-    VerifierKind, VerifierStatus,
+    BaselineResult, Candidate, FailureCategory, FailureEvent, FailureScope, MutantResult,
+    MutantStatus, VerifierKind, VerifierStatus,
 };
 use crate::mutations::{
     add_parameter, move_module, remove_import, remove_module, remove_parameter, rename_parameter,
@@ -247,11 +247,13 @@ fn run_mutant(
 
     let local_failures: Vec<FailureEvent> = all_failures
         .iter()
-        .filter(|f| f.is_local)
+        .filter(|f| f.scope == FailureScope::Local)
         .cloned()
         .collect();
-    let external_failures: Vec<FailureEvent> =
-        all_failures.into_iter().filter(|f| !f.is_local).collect();
+    let external_failures: Vec<FailureEvent> = all_failures
+        .into_iter()
+        .filter(|f| f.scope == FailureScope::External)
+        .collect();
 
     MutantResult {
         candidate,
@@ -324,7 +326,7 @@ fn make_runner_failure(_file: &camino::Utf8PathBuf, msg: &str) -> FailureEvent {
         symbol: None,
         category: FailureCategory::Unknown,
         message: msg.to_string(),
-        is_local: true,
+        scope: FailureScope::Local,
     }
 }
 

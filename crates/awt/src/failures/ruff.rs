@@ -4,7 +4,7 @@ use camino::Utf8PathBuf;
 use serde::Deserialize;
 
 use crate::model::RunnerError;
-use crate::model::{FailureCategory, FailureEvent, MutantId, VerifierKind};
+use crate::model::{FailureCategory, FailureEvent, FailureScope, MutantId, VerifierKind};
 use crate::runner::command;
 
 #[derive(Debug, Deserialize)]
@@ -38,7 +38,11 @@ pub fn run_and_parse(
         .into_iter()
         .map(|d| {
             let rel = relativize(&d.filename, repo_root);
-            let is_local = mutant_id.0.starts_with(rel.as_str());
+            let scope = if mutant_id.0.starts_with(rel.as_str()) {
+                FailureScope::Local
+            } else {
+                FailureScope::External
+            };
             FailureEvent {
                 mutant_id: mutant_id.clone(),
                 command: VerifierKind::Ruff,
@@ -48,7 +52,7 @@ pub fn run_and_parse(
                 symbol: d.code,
                 category: FailureCategory::Lint,
                 message: d.message,
-                is_local,
+                scope,
             }
         })
         .collect();

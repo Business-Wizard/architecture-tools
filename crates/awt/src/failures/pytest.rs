@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use camino::Utf8PathBuf;
 
-use crate::model::{FailureCategory, FailureEvent, MutantId, RunnerError, VerifierKind};
+use crate::model::{
+    FailureCategory, FailureEvent, FailureScope, MutantId, RunnerError, VerifierKind,
+};
 use crate::runner::command;
 
 pub fn run_and_parse(
@@ -44,7 +46,11 @@ fn parse_line(mutant_id: &MutantId, line: &str, repo_root: &Path) -> Option<Fail
     // Extract file from node_id (everything before first ::)
     let raw_file = node_id.split("::").next()?;
     let rel = relativize(raw_file, repo_root);
-    let is_local = mutant_id.0.starts_with(rel.as_str());
+    let scope = if mutant_id.0.starts_with(rel.as_str()) {
+        FailureScope::Local
+    } else {
+        FailureScope::External
+    };
 
     let category = classify_pytest(prefix, message);
 
@@ -57,7 +63,7 @@ fn parse_line(mutant_id: &MutantId, line: &str, repo_root: &Path) -> Option<Fail
         symbol: Some(node_id.to_string()),
         category,
         message: message.to_string(),
-        is_local,
+        scope,
     })
 }
 
