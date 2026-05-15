@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use camino::Utf8PathBuf;
 use petgraph::algo::connected_components;
 use petgraph::visit::EdgeRef;
@@ -113,25 +111,4 @@ pub fn refactor_hints(centers: &[CenterOfGravity]) -> Vec<String> {
             )
         })
         .collect()
-}
-
-/// Package distance: number of differing path components between two files.
-pub fn package_distance(a: &Utf8PathBuf, b: &Utf8PathBuf) -> usize {
-    let a_parts: Vec<&str> = a.components().map(|c| c.as_str()).collect();
-    let b_parts: Vec<&str> = b.components().map(|c| c.as_str()).collect();
-    let common = a_parts
-        .iter()
-        .zip(b_parts.iter())
-        .take_while(|(x, y)| x == y)
-        .count();
-    (a_parts.len() - common) + (b_parts.len() - common)
-}
-
-#[allow(dead_code)]
-fn count_by_package(centers: &[CenterOfGravity]) -> HashMap<String, usize> {
-    let mut map: HashMap<String, usize> = HashMap::new();
-    for c in centers {
-        *map.entry(c.top_package.clone()).or_insert(0) += 1;
-    }
-    map
 }

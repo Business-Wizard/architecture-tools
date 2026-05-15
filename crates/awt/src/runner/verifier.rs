@@ -74,11 +74,11 @@ fn extract_basedpyright_errors(json: &str) -> Vec<String> {
     diags
         .iter()
         .filter(|d| d["severity"].as_str() == Some("error"))
-        .filter_map(|d| {
+        .map(|d| {
             let file = d["file"].as_str().unwrap_or("?");
             let msg = d["message"].as_str().unwrap_or("?");
             let line = d["range"]["start"]["line"].as_u64().unwrap_or(0) + 1;
-            Some(format!("{file}:{line}: {msg}"))
+            format!("{file}:{line}: {msg}")
         })
         .collect()
 }

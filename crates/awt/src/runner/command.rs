@@ -9,7 +9,6 @@ pub struct CommandOutput {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
-    pub duration_secs: f64,
 }
 
 impl CommandOutput {
@@ -32,8 +31,7 @@ pub fn run_in(
         .output()
         .map_err(RunnerError::Io)?;
 
-    let elapsed = start.elapsed();
-    if elapsed >= timeout {
+    if start.elapsed() >= timeout {
         return Err(RunnerError::Timeout(timeout.as_secs()));
     }
 
@@ -41,6 +39,5 @@ pub fn run_in(
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         exit_code: output.status.code().unwrap_or(-1),
-        duration_secs: elapsed.as_secs_f64(),
     })
 }

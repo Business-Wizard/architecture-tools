@@ -20,7 +20,6 @@ pub type CouplingGraph = DiGraph<CouplingNode, CouplingEdge>;
 
 pub struct GraphIndex {
     pub graph: CouplingGraph,
-    pub node_map: HashMap<Utf8PathBuf, NodeIndex>,
 }
 
 impl GraphIndex {
@@ -71,7 +70,7 @@ impl GraphIndex {
             }
         }
 
-        GraphIndex { graph, node_map }
+        GraphIndex { graph }
     }
 }
 

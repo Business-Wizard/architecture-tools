@@ -133,12 +133,6 @@ pub struct MutantResult {
 }
 
 impl MutantResult {
-    pub fn all_failures(&self) -> impl Iterator<Item = &FailureEvent> {
-        self.local_failures
-            .iter()
-            .chain(self.external_failures.iter())
-    }
-
     pub fn affected_files(&self) -> Vec<&Utf8PathBuf> {
         let mut files: Vec<&Utf8PathBuf> = self.external_failures.iter().map(|f| &f.file).collect();
         files.sort();
@@ -178,8 +172,6 @@ impl BaselineResult {
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    #[error("config file not found: {0}")]
-    NotFound(Utf8PathBuf),
     #[error("config parse error: {0}")]
     Parse(#[from] toml::de::Error),
     #[error("io error: {0}")]

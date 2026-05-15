@@ -7,11 +7,14 @@ use crate::discovery;
 use crate::failures::{basedpyright, pytest, ruff};
 use crate::graph::clustering;
 use crate::graph::coupling_graph::GraphIndex;
+use crate::model::OperatorKind;
 use crate::model::{
     BaselineResult, Candidate, FailureCategory, FailureEvent, MutantResult, MutantStatus,
     VerifierKind, VerifierStatus,
 };
-use crate::mutations::add_parameter;
+use crate::mutations::{
+    add_parameter, move_module, remove_import, remove_module, remove_parameter, rename_parameter,
+};
 use crate::repo;
 use crate::report::summary::{self, RunReport};
 use crate::report::terminal;
@@ -186,50 +189,12 @@ fn run_mutant(
     timeout_secs: u64,
     keep_on_fail: bool,
 ) -> MutantResult {
-    let source = match std::fs::read(repo_root.join(candidate.file.as_str())) {
-        Ok(s) => s,
-        Err(e) => {
-            return MutantResult {
-                candidate,
-                status: MutantStatus::Invalid,
-                local_failures: vec![make_runner_failure(&candidate_stub(), &e.to_string())],
-                external_failures: vec![],
-            };
-        }
-    };
-
-    let mutated = match add_parameter::apply(&source, &candidate) {
-        Ok(m) => m,
-        Err(e) => {
-            return MutantResult {
-                candidate,
-                status: MutantStatus::Invalid,
-                local_failures: vec![make_runner_failure(&candidate_stub(), &e.to_string())],
-                external_failures: vec![],
-            };
-        }
-    };
-
-    let temp = match TempRepo::copy_from(repo_root) {
+    let temp = match prepare_temp(repo_root, &candidate) {
         Ok(t) => t,
-        Err(e) => {
-            return MutantResult {
-                candidate,
-                status: MutantStatus::Invalid,
-                local_failures: vec![make_runner_failure(&candidate_stub(), &e.to_string())],
-                external_failures: vec![],
-            };
+        Err(msg) => {
+            return invalid(&candidate, &msg);
         }
     };
-
-    if let Err(e) = temp.write_mutated_file(candidate.file.as_str(), &mutated) {
-        return MutantResult {
-            candidate,
-            status: MutantStatus::Invalid,
-            local_failures: vec![make_runner_failure(&candidate_stub(), &e.to_string())],
-            external_failures: vec![],
-        };
-    }
 
     let timeout = std::time::Duration::from_secs(timeout_secs);
     let temp_path = temp.path().to_path_buf();
@@ -241,7 +206,6 @@ fn run_mutant(
     all_failures.extend(pytest::run_and_parse(id, &temp_path, timeout).unwrap_or_default());
 
     let any_fail = !all_failures.is_empty();
-
     let status = if any_fail {
         MutantStatus::Breaks
     } else {
@@ -265,6 +229,54 @@ fn run_mutant(
         status,
         local_failures,
         external_failures,
+    }
+}
+
+fn prepare_temp(repo_root: &std::path::Path, candidate: &Candidate) -> Result<TempRepo, String> {
+    let source =
+        std::fs::read(repo_root.join(candidate.file.as_str())).map_err(|e| e.to_string())?;
+
+    let patch = match candidate.operator {
+        OperatorKind::AddRequiredParameter => {
+            Some(add_parameter::apply(&source, candidate).map_err(|e| e.to_string())?)
+        }
+        OperatorKind::RenameParameter => {
+            Some(rename_parameter::apply(&source, candidate).map_err(|e| e.to_string())?)
+        }
+        OperatorKind::RemoveParameter => {
+            Some(remove_parameter::apply(&source, candidate).map_err(|e| e.to_string())?)
+        }
+        OperatorKind::RemoveImport => {
+            Some(remove_import::apply(&source, candidate).map_err(|e| e.to_string())?)
+        }
+        OperatorKind::RemoveModule | OperatorKind::MoveModule => None,
+    };
+
+    let temp = TempRepo::copy_from(repo_root).map_err(|e| e.to_string())?;
+
+    match candidate.operator {
+        OperatorKind::RemoveModule => {
+            remove_module::apply(temp.path(), candidate.file.as_str())
+                .map_err(|e| e.to_string())?;
+        }
+        OperatorKind::MoveModule => {
+            move_module::apply(temp.path(), candidate.file.as_str()).map_err(|e| e.to_string())?;
+        }
+        _ => {
+            temp.write_mutated_file(candidate.file.as_str(), &patch.unwrap_or_default())
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(temp)
+}
+
+fn invalid(candidate: &Candidate, msg: &str) -> MutantResult {
+    MutantResult {
+        candidate: candidate.clone(),
+        status: MutantStatus::Invalid,
+        local_failures: vec![make_runner_failure(&candidate_stub(), msg)],
+        external_failures: vec![],
     }
 }
 

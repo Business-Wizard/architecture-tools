@@ -43,7 +43,7 @@ impl TempRepo {
     }
 
     pub fn keep(self) -> PathBuf {
-        self.dir.into_path()
+        self.dir.keep()
     }
 }
 
