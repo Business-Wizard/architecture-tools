@@ -133,16 +133,15 @@ fn run_command(args: &RunArgs) {
         .take(cfg.max_mutants)
         .collect();
 
-    println!(
-        "\nRunning {} mutants ({} jobs)...",
-        candidates.len(),
-        cfg.jobs
-    );
-
     let pb = Arc::new(ProgressBar::new(candidates.len() as u64));
     pb.set_style(
         ProgressStyle::with_template("[{pos}/{len}] {percent}%").expect("valid progress template"),
     );
+    pb.println(format!(
+        "\nRunning {} mutants ({} jobs)...",
+        candidates.len(),
+        cfg.jobs
+    ));
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(cfg.jobs)
