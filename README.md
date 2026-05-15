@@ -115,10 +115,13 @@ Once built, the `awt` binary is available as:
 
 ```bash
 # Run mutation analysis on a Python project
-./target/debug/awt run [OPTIONS] <PYTHON_PROJECT_PATH>
+./target/debug/awt run --repo <PATH_TO_PYTHON_PROJECT> [OPTIONS]
 
 # Or via cargo
-cargo run -p awt -- run [OPTIONS] <PYTHON_PROJECT_PATH>
+cargo run -p awt -- run --repo <PATH_TO_PYTHON_PROJECT> [OPTIONS]
+
+# Show all available options
+./target/debug/awt run --help
 ```
 
 ### Configuration
