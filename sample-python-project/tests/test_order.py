@@ -35,3 +35,24 @@ def test_domain_order_creation_should_start_pending() -> None:
     customer = Customer("c2", "Jane Smith", "jane@example.com")
     order = DomainOrder("o2", customer, Decimal("49.99"))  # violation: constructs Order directly
     assert order.status == "pending"
+
+
+def test_order_get_customer_name_should_return_full_name() -> None:
+    customer = Customer("c3", "Alice Brown", "alice@example.com")
+    order = Order("o3", customer, Decimal("10.00"))
+    actual = order.get_customer_name()
+    assert actual == "Alice Brown"
+
+
+def test_domain_order_get_customer_name_should_return_full_name() -> None:
+    customer = Customer("c4", "Bob Green", "bob@example.com")
+    order = DomainOrder("o4", customer, Decimal("20.00"))
+    actual = order.get_customer_name()
+    assert actual == "Bob Green"
+
+
+def test_domain_order_charge_should_return_charge_id() -> None:
+    customer = Customer("c5", "Carol White", "carol@example.com")
+    order = DomainOrder("o5", customer, Decimal("30.00"))
+    actual = order.charge()
+    assert actual == "ch_stub_ok"
