@@ -1,4 +1,5 @@
 # data-app-template
+
 template for future data projects
 
 ## Getting Started - Development Environment
@@ -46,53 +47,19 @@ Key design:
 - venv activation deferred to zsh precmd hook (runs after prompt, before command)
 - Result: Instant prompt + venv active before any command runs
 
-### Team venv Activation
-
-Python projects with `pyproject.toml` need venv auto-activation. Add this to your `~/.zshrc`:
-
-```bash
-# Auto-activate venv in nix shells (runs after prompt, before first command)
-function activate_venv_if_needed() {
-  local current_venv_path="$(pwd)/.venv"
-
-  # If we're in a nix shell
-  if [[ -n "$IN_NIX_SHELL" ]]; then
-    # If .venv exists and we're not already in the right venv
-    if [ -d ".venv" ] && [[ "$VIRTUAL_ENV" != "$current_venv_path" ]]; then
-      # Deactivate old venv first if we're in one
-      if [[ -n "$VIRTUAL_ENV" ]]; then
-        deactivate 2>/dev/null || true
-      fi
-      # Activate the correct venv
-      source .venv/bin/activate 2>/dev/null
-    fi
-  else
-    # We're NOT in a nix shell, deactivate venv if active
-    if [[ -n "$VIRTUAL_ENV" ]]; then
-      deactivate 2>/dev/null || true
-    fi
-  fi
-}
-
-precmd_functions+=(activate_venv_if_needed)
-```
-
-Once added to your shell config:
-- direnv + nix: Instant (no blocking)
-- venv: Auto-activated before first command
-- First run: shellHook runs `uv sync` to create `.venv` if needed
-
 ### Managing Podman VM (macOS)
 
 Podman is included in the project dependencies, but VM startup is optional and personal preference:
 
 **Option 1: Manual Start**
+
 ```bash
 podman machine start
 ```
 
 **Option 2: Automatic (add to your ~/.zshrc)**
 This is a personal choice - not enforced by the project. Add this to your shell config:
+
 ```bash
 # Auto-start Podman VM once per shell session
 if command -v podman &> /dev/null; then
