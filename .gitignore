@@ -147,3 +147,4 @@ dmypy.json
 .beads/embeddeddolt/
 *.db
 .beads-credential-key
+.claude/settings.local.json
