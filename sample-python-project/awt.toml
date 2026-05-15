@@ -1,7 +1,10 @@
 # Architecture Wind Tunnel configuration for sample project
-verifiers = ["ruff"]
+verifiers = ["ruff", "basedpyright", "pytest"]
 
 [operators]
 add_required_parameter = true
+rename_parameter = true
+remove_parameter = true
+remove_import = true
 
-max_mutations = 50
+max_mutations = 200

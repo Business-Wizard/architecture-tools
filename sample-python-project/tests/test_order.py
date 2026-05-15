@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 from src.customer import Customer
+from src.domain_order import Order as DomainOrder
 from src.order import Order
 
 
@@ -28,3 +29,9 @@ def test_order_cancellation() -> None:
     order = Order("o1", customer, Decimal("99.99"))
     order.cancel()
     assert order.status == "cancelled"
+
+
+def test_domain_order_creation_should_start_pending() -> None:
+    customer = Customer("c2", "Jane Smith", "jane@example.com")
+    order = DomainOrder("o2", customer, Decimal("49.99"))  # violation: constructs Order directly
+    assert order.status == "pending"
