@@ -82,7 +82,18 @@ fn print_centers_section(clustering: &ClusteringResult) {
     }
 
     println!("{table}");
-    println!("  Coupling components: {}", clustering.component_count);
+    let component_msg = if clustering.component_count == 1 {
+        "all files are tightly interconnected".to_string()
+    } else {
+        format!(
+            "{} separate coupling groups (lower is tighter)",
+            clustering.component_count
+        )
+    };
+    println!(
+        "  Coupling components: {} ({})",
+        clustering.component_count, component_msg
+    );
 }
 
 fn print_unexpected_section(clustering: &ClusteringResult) {

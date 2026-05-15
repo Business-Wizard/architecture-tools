@@ -124,26 +124,36 @@ cargo run -p awt -- run --repo <PATH_TO_PYTHON_PROJECT> [OPTIONS]
 ./target/debug/awt run --help
 ```
 
+**Key Options:**
+- `--repo <PATH>` — Path to Python repository (required)
+- `--max-mutants <N>` — Limit mutations to run (default: 500 from config, or 500 if not configured)
+- `--jobs <N>` — Parallel jobs (default: CPU count)
+- `--json-out <PATH>` — Write JSON results to file
+- `--dry-run` — Discover candidates without running mutations
+
 ### Configuration
 
 Create an `awt.toml` in your Python project root to configure the tool:
 
 ```toml
-# Verifiers to run (at least one required)
-verifiers = ["ruff", "basedpyright", "pytest"]
+# Mutation operators to enable
+[operators]
+add_required_parameter = true
+rename_parameter = false
+remove_parameter = false
+remove_import = false
+remove_module = false
 
-# Optional: mutation operators to apply
-operators = [
-  "add_required_parameter",
-  "remove_parameter",
-  "rename_parameter",
-  "remove_import",
-  "remove_module",
-]
-
-# Optional: maximum mutations to test
+# Optional: maximum mutations to test (default: 500)
 max_mutations = 100
 ```
+
+The tool runs all three verifiers by default:
+- **ruff**: Fast linting and style checks
+- **basedpyright**: Type checking (requires Python 3.11+ stubs)
+- **pytest**: Actual test execution (requires passing tests)
+
+The baseline (original code) must pass all verifiers before mutations run.
 
 ### Example Workflow
 
@@ -168,10 +178,35 @@ cargo build -p awt
 
 ### Output
 
-The tool produces:
-- **Terminal Report**: Coupling analysis showing which functions/modules are tightly coupled
-- **JSON Output** (optional): Machine-readable results for further analysis
-- **Delta Report**: Before/after comparison of what breaks with each mutation
+The tool produces a terminal report with these sections:
+
+#### Baseline
+Tests that the original code passes all verifiers. If baseline fails, mutations are skipped (no point testing broken code).
+
+#### Mutation Summary
+- **Total**: Number of mutations generated
+- **Breaks**: Mutations that caused a verifier to fail (indicates coupling)
+- **Survives**: Mutations that all verifiers still pass (low coupling)
+- **Invalid**: Mutations that couldn't be applied
+
+#### Top Centers of Gravity
+Files with the most coupling. Shows:
+- **Source code affected**: How many other source files break when this file is mutated
+- **Test code affected**: How many test files break when this file is mutated
+- **Package**: Which package the file belongs to
+
+#### Coupling Components
+A measure of how interconnected the coupling is:
+- **1 component** = All coupling is in one tightly-interconnected web
+- **2+ components** = Coupling is fragmented into separate groups
+
+Lower numbers (approaching 1) indicate tighter coupling.
+
+#### Unexpected Cross-Package Coupling
+Shows mutations that break code in **unexpected** packages (e.g., a `src/` module mutation breaking a `tests/` file when they shouldn't be coupled). If this section is empty, all detected coupling is expected and contained.
+
+**JSON Output** (optional): Use `--json-out <PATH>` for machine-readable results
+**Delta Report**: Use `--compare <PATH>` to compare against a previous run
 
 ### Testing & Development
 
