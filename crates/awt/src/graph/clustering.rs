@@ -9,7 +9,6 @@ pub struct CenterOfGravity {
     pub file: Utf8PathBuf,
     pub affected_source_code: usize,
     pub affected_test_code: usize,
-    pub top_package: String,
 }
 
 #[derive(Debug)]
@@ -49,12 +48,10 @@ pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
                     source_code += 1;
                 }
             }
-            let top_package = top_package(&node.path);
             Some(CenterOfGravity {
                 file: node.path.clone(),
                 affected_source_code: source_code,
                 affected_test_code: test_code,
-                top_package,
             })
         })
         .collect();

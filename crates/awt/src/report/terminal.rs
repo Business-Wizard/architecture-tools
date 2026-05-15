@@ -65,19 +65,13 @@ fn print_centers_section(clustering: &ClusteringResult) {
     println!("\n─── Top Centers of Gravity ──────────────────────────────");
     let mut table = Table::new();
     table.load_preset(comfy_table::presets::UTF8_FULL);
-    table.set_header(vec![
-        "File",
-        "Source code affected",
-        "Test code affected",
-        "Package",
-    ]);
+    table.set_header(vec!["File", "Source code affected", "Test code affected"]);
 
     for center in clustering.centers.iter().take(10) {
         table.add_row(vec![
             Cell::new(center.file.as_str()),
             Cell::new(center.affected_source_code.to_string()),
             Cell::new(center.affected_test_code.to_string()),
-            Cell::new(&center.top_package),
         ]);
     }
 
@@ -85,15 +79,9 @@ fn print_centers_section(clustering: &ClusteringResult) {
     let component_msg = if clustering.component_count == 1 {
         "all files are tightly interconnected".to_string()
     } else {
-        format!(
-            "{} separate coupling groups (lower is tighter)",
-            clustering.component_count
-        )
+        format!("{} separate coupling groups", clustering.component_count)
     };
-    println!(
-        "  Coupling components: {} ({})",
-        clustering.component_count, component_msg
-    );
+    println!("  Coupling: {component_msg}");
 }
 
 fn print_unexpected_section(clustering: &ClusteringResult) {
