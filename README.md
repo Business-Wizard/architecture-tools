@@ -1,4 +1,4 @@
-# data-app-template
+# Architecture Mutation Testing
 
 template for future data projects
 
