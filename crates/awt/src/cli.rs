@@ -19,6 +19,7 @@ use crate::mutations::{
     add_parameter, move_module, remove_import, remove_module, remove_parameter, rename_parameter,
 };
 use crate::repo;
+use crate::report::dot;
 use crate::report::summary::{self, RunReport};
 use crate::report::terminal;
 use crate::runner::temp_repo::TempRepo;
@@ -61,6 +62,13 @@ pub struct RunArgs {
 
     #[arg(long, help = "Compare against a previous run JSON for delta report")]
     pub compare: Option<Utf8PathBuf>,
+
+    #[arg(
+        long,
+        default_value = "coupling.dot",
+        help = "Write coupling graph to this .dot file"
+    )]
+    pub dot_out: Utf8PathBuf,
 
     #[arg(
         long,
@@ -171,8 +179,16 @@ fn run_command(args: &RunArgs) {
 
     let report = RunReport::build(&baseline, &results, &cluster_result);
 
+    write_outputs(args, &graph_idx, &report);
+}
+
+fn write_outputs(args: &RunArgs, graph_idx: &GraphIndex, report: &RunReport) {
+    if let Err(e) = dot::write_dot(graph_idx, args.dot_out.as_path()) {
+        eprintln!("error writing dot output: {e}");
+    }
+
     if let Some(json_path) = &args.json_out {
-        match serde_json::to_string_pretty(&report) {
+        match serde_json::to_string_pretty(report) {
             Ok(json) => {
                 if let Err(e) = std::fs::write(json_path.as_std_path(), json) {
                     eprintln!("error writing json output: {e}");
@@ -186,7 +202,7 @@ fn run_command(args: &RunArgs) {
         match std::fs::read_to_string(compare_path.as_std_path()) {
             Ok(raw) => match serde_json::from_str::<RunReport>(&raw) {
                 Ok(before) => {
-                    let delta = summary::compute_delta(&before, &report);
+                    let delta = summary::compute_delta(&before, report);
                     summary::print_delta(&delta);
                 }
                 Err(e) => eprintln!("error parsing compare file: {e}"),
