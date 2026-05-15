@@ -64,6 +64,7 @@ fn print_centers_section(clustering: &ClusteringResult) {
 
     println!("\n─── Top Centers of Gravity ──────────────────────────────");
     let mut table = Table::new();
+    table.load_preset(comfy_table::presets::UTF8_FULL);
     table.set_header(vec![
         "File",
         "Source code affected",
@@ -91,6 +92,7 @@ fn print_unexpected_section(clustering: &ClusteringResult) {
 
     println!("\n─── Unexpected Cross-Package Coupling ───────────────────");
     let mut table = Table::new();
+    table.load_preset(comfy_table::presets::UTF8_FULL);
     table.set_header(vec!["Mutant file", "Affected file", "Failures"]);
 
     for uc in clustering.unexpected.iter().take(15) {
