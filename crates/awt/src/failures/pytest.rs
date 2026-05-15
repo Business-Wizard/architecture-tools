@@ -17,10 +17,6 @@ pub fn run_and_parse(
         return Ok(vec![]);
     }
 
-    eprintln!(
-        "DEBUG pytest stdout: {:?}",
-        &out.stdout[..out.stdout.len().min(500)]
-    );
     Ok(parse_text_output(mutant_id, &out.stdout, repo_root))
 }
 

@@ -45,6 +45,10 @@ pub fn discover(repo_root: &Path, cfg: &Config) -> DiscoveryResult {
             Err(_) => continue,
         };
 
+        if is_test_file(rel.as_str()) {
+            continue;
+        }
+
         let Ok(source) = std::fs::read(path) else {
             continue;
         };
@@ -116,4 +120,12 @@ pub fn discover(repo_root: &Path, cfg: &Config) -> DiscoveryResult {
     }
 
     DiscoveryResult { candidates, counts }
+}
+
+fn is_test_file(path: &str) -> bool {
+    path.contains("/tests/")
+        || path.contains("/test_")
+        || path.ends_with("_test.py")
+        || path.starts_with("tests/")
+        || path.starts_with("test_")
 }
