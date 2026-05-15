@@ -21,6 +21,7 @@ tree-sitter-python = "0.23"
 petgraph = "0.7"
 rayon = "1"
 comfy-table = "7"
+indicatif = "0.17"
 colored = "3"
 sha2 = "0.10"
 

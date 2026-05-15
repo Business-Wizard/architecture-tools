@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 
 use crate::config;
@@ -136,6 +139,11 @@ fn run_command(args: &RunArgs) {
         cfg.jobs
     );
 
+    let pb = Arc::new(ProgressBar::new(candidates.len() as u64));
+    pb.set_style(
+        ProgressStyle::with_template("[{pos}/{len}] {percent}%").expect("valid progress template"),
+    );
+
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(cfg.jobs)
         .build()
@@ -148,9 +156,15 @@ fn run_command(args: &RunArgs) {
     let results: Vec<MutantResult> = pool.install(|| {
         candidates
             .into_par_iter()
-            .map(|candidate| run_mutant(candidate, repo_ref, timeout, keep_on_fail))
+            .map(|candidate| {
+                let result = run_mutant(candidate, repo_ref, timeout, keep_on_fail);
+                pb.inc(1);
+                result
+            })
             .collect()
     });
+
+    pb.finish_and_clear();
 
     let graph_idx = GraphIndex::build(&results);
     let cluster_result = clustering::analyse(&graph_idx);
