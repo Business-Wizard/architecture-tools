@@ -15,18 +15,6 @@ impl VerifierSet {
         }
     }
 
-    pub fn run_ruff(&self, repo: &Path) -> Result<VerifierStatus, RunnerError> {
-        let out = command::run_in("uv", &["run", "ruff", "check", "."], repo, self.timeout)?;
-        if out.success() {
-            Ok(VerifierStatus::Pass)
-        } else {
-            Ok(VerifierStatus::Fail(collect_output(
-                &out.stdout,
-                &out.stderr,
-            )))
-        }
-    }
-
     pub fn run_basedpyright(&self, repo: &Path) -> Result<VerifierStatus, RunnerError> {
         let out = command::run_in(
             "uv",

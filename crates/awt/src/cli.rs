@@ -7,7 +7,7 @@ use rayon::prelude::*;
 
 use crate::config;
 use crate::discovery;
-use crate::failures::{basedpyright, pytest, ruff};
+use crate::failures::{basedpyright, pytest};
 use crate::graph::clustering;
 use crate::graph::coupling_graph::GraphIndex;
 use crate::model::OperatorKind;
@@ -230,7 +230,6 @@ fn run_mutant(
     let id = &candidate.id;
 
     let mut all_failures: Vec<FailureEvent> = vec![];
-    all_failures.extend(ruff::run_and_parse(id, &temp_path, timeout).unwrap_or_default());
     all_failures.extend(basedpyright::run_and_parse(id, &temp_path, timeout).unwrap_or_default());
     all_failures.extend(pytest::run_and_parse(id, &temp_path, timeout).unwrap_or_default());
 
@@ -319,7 +318,7 @@ fn make_runner_failure(_file: &camino::Utf8PathBuf, msg: &str) -> FailureEvent {
     use crate::model::MutantId;
     FailureEvent {
         mutant_id: MutantId("unknown".into()),
-        command: VerifierKind::Ruff,
+        command: VerifierKind::Basedpyright,
         file: camino::Utf8PathBuf::from("unknown"),
         line: None,
         column: None,
@@ -331,9 +330,6 @@ fn make_runner_failure(_file: &camino::Utf8PathBuf, msg: &str) -> FailureEvent {
 }
 
 fn run_baseline(verifiers: &VerifierSet, repo: &std::path::Path) -> BaselineResult {
-    let ruff = verifiers
-        .run_ruff(repo)
-        .unwrap_or_else(|e| VerifierStatus::Fail(vec![format!("runner error: {e}")]));
     let basedpyright = verifiers
         .run_basedpyright(repo)
         .unwrap_or_else(|e| VerifierStatus::Fail(vec![format!("runner error: {e}")]));
@@ -341,14 +337,12 @@ fn run_baseline(verifiers: &VerifierSet, repo: &std::path::Path) -> BaselineResu
         .run_pytest(repo)
         .unwrap_or_else(|e| VerifierStatus::Fail(vec![format!("runner error: {e}")]));
     BaselineResult {
-        ruff,
         basedpyright,
         pytest,
     }
 }
 
 fn print_baseline(b: &BaselineResult) {
-    print_verifier_status("ruff", &b.ruff);
     print_verifier_status("basedpyright", &b.basedpyright);
     print_verifier_status("pytest", &b.pytest);
 }

@@ -72,7 +72,6 @@ pub struct Candidate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VerifierKind {
-    Ruff,
     Basedpyright,
     Pytest,
 }
@@ -80,7 +79,6 @@ pub enum VerifierKind {
 impl std::fmt::Display for VerifierKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Self::Ruff => "ruff",
             Self::Basedpyright => "basedpyright",
             Self::Pytest => "pytest",
         };
@@ -93,7 +91,6 @@ pub enum FailureCategory {
     Syntax,
     Type,
     Import,
-    Lint,
     TestAssertion,
     TestCollection,
     Runtime,
@@ -163,14 +160,13 @@ impl VerifierStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaselineResult {
-    pub ruff: VerifierStatus,
     pub basedpyright: VerifierStatus,
     pub pytest: VerifierStatus,
 }
 
 impl BaselineResult {
     pub fn all_pass(&self) -> bool {
-        self.ruff.is_pass() && self.basedpyright.is_pass() && self.pytest.is_pass()
+        self.basedpyright.is_pass() && self.pytest.is_pass()
     }
 }
 

@@ -17,7 +17,6 @@ pub fn print_report(
 
 fn print_baseline_section(b: &BaselineResult) {
     println!("\n─── Baseline ───────────────────────────────────────────");
-    print_verifier("ruff", &b.ruff);
     print_verifier("basedpyright", &b.basedpyright);
     print_verifier("pytest", &b.pytest);
 }
