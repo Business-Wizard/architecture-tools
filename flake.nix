@@ -23,7 +23,6 @@
             prek
             uv
             cargo
-            rustup
             claude-code
             claude-monitor
             docker
