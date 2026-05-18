@@ -128,4 +128,33 @@ mod tests {
         let actual = parse_line(&id, line, std::path::Path::new("/repo"));
         assert!(actual.is_none());
     }
+
+    #[test]
+    fn test_failed_line_should_produce_external_scope_for_test_file() {
+        let id = MutantId("src/domain/order.py::Order.__init__::add_required_parameter".into());
+        let line = "FAILED tests/test_order.py::TestOrder::test_create - AssertionError: x";
+        let actual = parse_line(&id, line, std::path::Path::new("/repo")).unwrap();
+        assert_eq!(actual.scope, FailureScope::External);
+    }
+
+    #[test]
+    fn test_error_module_not_found_should_classify_as_import() {
+        let actual = classify_pytest("ERROR", "ModuleNotFoundError: No module named 'foo'");
+        assert_eq!(actual, FailureCategory::Import);
+    }
+
+    #[test]
+    fn test_error_without_import_should_classify_as_test_collection() {
+        let actual = classify_pytest("ERROR", "fixture 'db' not found");
+        assert_eq!(actual, FailureCategory::TestCollection);
+    }
+
+    #[test]
+    fn test_failed_with_type_error_should_classify_as_type() {
+        let actual = classify_pytest(
+            "FAILED",
+            "TypeError: foo() takes 1 positional argument but 2 given",
+        );
+        assert_eq!(actual, FailureCategory::Type);
+    }
 }

@@ -109,3 +109,76 @@ pub fn refactor_hints(centers: &[CenterOfGravity]) -> Vec<String> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode, FileRole};
+
+    fn make_graph_index(edges: &[(&str, &str)]) -> GraphIndex {
+        let mut graph = CouplingGraph::new();
+        let mut map: std::collections::HashMap<&str, petgraph::graph::NodeIndex> =
+            std::collections::HashMap::new();
+        for (src, dst) in edges {
+            let s = *map.entry(src).or_insert_with(|| {
+                graph.add_node(CouplingNode {
+                    path: Utf8PathBuf::from(*src),
+                    role: FileRole::Source,
+                })
+            });
+            let d = *map.entry(dst).or_insert_with(|| {
+                graph.add_node(CouplingNode {
+                    path: Utf8PathBuf::from(*dst),
+                    role: FileRole::Source,
+                })
+            });
+            graph.add_edge(s, d, CouplingEdge { failure_count: 3 });
+        }
+        GraphIndex { graph }
+    }
+
+    #[test]
+    fn test_top_package_with_nested_path_should_return_first_component() {
+        let actual = top_package(&Utf8PathBuf::from("src/domain/order.py"));
+        assert_eq!(actual, "src");
+    }
+
+    #[test]
+    fn test_top_package_with_single_component_should_return_it() {
+        let actual = top_package(&Utf8PathBuf::from("order.py"));
+        assert_eq!(actual, "order.py");
+    }
+
+    #[test]
+    fn test_top_package_with_empty_path_should_return_empty_string() {
+        let actual = top_package(&Utf8PathBuf::from(""));
+        assert_eq!(actual, "");
+    }
+
+    #[test]
+    fn test_refactor_hints_should_cap_at_five_entries() {
+        let centers: Vec<CenterOfGravity> = (0..7)
+            .map(|i| CenterOfGravity {
+                file: Utf8PathBuf::from(format!("src/file{i}.py")),
+                affected_source_code: 1,
+                affected_test_code: 0,
+            })
+            .collect();
+        let actual = refactor_hints(&centers);
+        assert_eq!(actual.len(), 5);
+    }
+
+    #[test]
+    fn test_analyse_should_flag_different_package_edge_as_unexpected() {
+        let idx = make_graph_index(&[("src/a/order.py", "lib/b/report.py")]);
+        let result = analyse(&idx);
+        assert_eq!(result.unexpected.len(), 1);
+    }
+
+    #[test]
+    fn test_analyse_should_not_flag_same_package_edge_as_unexpected() {
+        let idx = make_graph_index(&[("src/a/order.py", "src/b/invoice.py")]);
+        let result = analyse(&idx);
+        assert!(result.unexpected.is_empty());
+    }
+}

@@ -95,4 +95,26 @@ mod tests {
         let expected_message = "unused import";
         assert_eq!(actual.message, expected_message);
     }
+
+    #[test]
+    fn test_ruff_diagnostic_with_null_fields_should_parse_to_none() {
+        let json = r#"[{"filename":"/repo/src/foo.py","row":null,"col":null,"code":null,"message":"bare error"}]"#;
+        let diagnostics: Vec<RuffDiagnostic> = serde_json::from_str(json).unwrap();
+        let actual = &diagnostics[0];
+        assert_eq!(actual.row, None);
+    }
+
+    #[test]
+    fn test_relativize_with_matching_prefix_should_strip_root() {
+        let actual = super::relativize("/repo/src/foo.py", std::path::Path::new("/repo"));
+        let expected = Utf8PathBuf::from("src/foo.py");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_relativize_with_non_matching_prefix_should_return_original() {
+        let actual = super::relativize("/other/src/foo.py", std::path::Path::new("/repo"));
+        let expected = Utf8PathBuf::from("/other/src/foo.py");
+        assert_eq!(actual, expected);
+    }
 }

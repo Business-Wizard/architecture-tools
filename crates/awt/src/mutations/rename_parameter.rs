@@ -80,4 +80,18 @@ mod tests {
         let expected = b"def foo(awt_renamed_x: int): pass";
         assert_eq!(actual, expected);
     }
+
+    #[test]
+    fn test_out_of_bounds_byte_range_should_return_error() {
+        let source = b"def foo(x: int): pass";
+        let actual = apply(source, &make_candidate(7, 999));
+        assert!(matches!(actual, Err(MutationError::OutOfBounds)));
+    }
+
+    #[test]
+    fn test_cls_only_params_should_return_error() {
+        let source = b"def foo(cls): pass";
+        let actual = apply(source, &make_candidate(7, 12));
+        assert!(matches!(actual, Err(MutationError::OutOfBounds)));
+    }
 }

@@ -74,6 +74,7 @@ pub struct Candidate {
 pub enum VerifierKind {
     Basedpyright,
     Pytest,
+    Ruff,
 }
 
 impl std::fmt::Display for VerifierKind {
@@ -81,6 +82,7 @@ impl std::fmt::Display for VerifierKind {
         let s = match self {
             Self::Basedpyright => "basedpyright",
             Self::Pytest => "pytest",
+            Self::Ruff => "ruff",
         };
         f.write_str(s)
     }
@@ -91,6 +93,7 @@ pub enum FailureCategory {
     Syntax,
     Type,
     Import,
+    Lint,
     TestAssertion,
     TestCollection,
     Runtime,
@@ -204,4 +207,87 @@ pub enum RunnerError {
     Io(#[from] std::io::Error),
     #[error("temp dir error: {0}")]
     TempDir(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mutant_id_new_should_format_with_double_colons() {
+        let actual = MutantId::new("src/foo.py", "my_func", "add_required_parameter");
+        let expected = MutantId("src/foo.py::my_func::add_required_parameter".into());
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_mutant_id_display_should_match_inner_string() {
+        let id = MutantId::new("src/foo.py", "my_func", "add_required_parameter");
+        let actual = id.to_string();
+        let expected = "src/foo.py::my_func::add_required_parameter";
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_verifier_status_pass_should_return_true() {
+        let actual = VerifierStatus::Pass.is_pass();
+        assert!(actual);
+    }
+
+    #[test]
+    fn test_verifier_status_fail_should_return_false() {
+        let actual = VerifierStatus::Fail(vec![]).is_pass();
+        assert!(!actual);
+    }
+
+    #[test]
+    fn test_baseline_result_all_pass_should_be_true_when_both_pass() {
+        let result = BaselineResult {
+            basedpyright: VerifierStatus::Pass,
+            pytest: VerifierStatus::Pass,
+        };
+        assert!(result.all_pass());
+    }
+
+    #[test]
+    fn test_baseline_result_all_pass_should_be_false_when_one_fails() {
+        let result = BaselineResult {
+            basedpyright: VerifierStatus::Fail(vec![]),
+            pytest: VerifierStatus::Pass,
+        };
+        assert!(!result.all_pass());
+    }
+
+    #[test]
+    fn test_mutant_result_affected_files_should_deduplicate() {
+        let file = Utf8PathBuf::from("src/b.py");
+        let make_event = |f: Utf8PathBuf| FailureEvent {
+            mutant_id: MutantId("id".into()),
+            command: VerifierKind::Pytest,
+            file: f,
+            line: None,
+            column: None,
+            symbol: None,
+            category: FailureCategory::TestAssertion,
+            message: String::new(),
+            scope: FailureScope::External,
+        };
+        let result = MutantResult {
+            candidate: Candidate {
+                id: MutantId::new("src/a.py", "func", "op"),
+                file: Utf8PathBuf::from("src/a.py"),
+                symbol: "func".into(),
+                kind: CandidateKind::Function,
+                operator: OperatorKind::AddRequiredParameter,
+                line: 1,
+                byte_start: 0,
+                byte_end: 0,
+            },
+            status: MutantStatus::Breaks,
+            local_failures: vec![],
+            external_failures: vec![make_event(file.clone()), make_event(file)],
+        };
+        let actual = result.affected_files();
+        assert_eq!(actual.len(), 1);
+    }
 }

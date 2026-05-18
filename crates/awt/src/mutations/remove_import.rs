@@ -45,4 +45,11 @@ mod tests {
         let expected = b"# import removed by awt\n\nx = baz()\n";
         assert_eq!(actual, expected);
     }
+
+    #[test]
+    fn test_out_of_bounds_byte_range_should_return_error() {
+        let source = b"import os\n";
+        let actual = apply(source, &make_candidate(0, 999));
+        assert!(matches!(actual, Err(MutationError::OutOfBounds)));
+    }
 }

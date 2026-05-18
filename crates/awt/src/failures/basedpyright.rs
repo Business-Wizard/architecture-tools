@@ -157,4 +157,35 @@ mod tests {
         assert!(events.is_empty());
         let _ = id;
     }
+
+    #[test]
+    fn test_undefined_rule_should_classify_as_type_category() {
+        let (actual, _, _) = classify("Value not defined", Some("reportUndefinedVariable"));
+        assert_eq!(actual, FailureCategory::Type);
+    }
+
+    #[test]
+    fn test_unknown_rule_should_classify_as_type_category() {
+        let (actual, _, _) = classify("Unknown type", Some("reportUnknownMemberType"));
+        assert_eq!(actual, FailureCategory::Type);
+    }
+
+    #[test]
+    fn test_no_rule_with_import_in_message_should_classify_as_import() {
+        let (actual, _, _) = classify("cannot import name 'Foo' from module 'bar'", None);
+        assert_eq!(actual, FailureCategory::Import);
+    }
+
+    #[test]
+    fn test_no_rule_without_import_keyword_should_classify_as_type() {
+        let (actual, _, _) = classify("Argument of type int is not assignable to str", None);
+        assert_eq!(actual, FailureCategory::Type);
+    }
+
+    #[test]
+    fn test_relativize_path_not_under_root_should_return_original() {
+        let actual = super::relativize("/other/path/file.py", std::path::Path::new("/repo"));
+        let expected = Utf8PathBuf::from("/other/path/file.py");
+        assert_eq!(actual, expected);
+    }
 }

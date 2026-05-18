@@ -92,3 +92,98 @@ fn is_test_file(path: &Utf8PathBuf) -> bool {
         || s.starts_with("tests/")
         || s.starts_with("test_")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{
+        CandidateKind, FailureCategory, FailureEvent, FailureScope, MutantId, MutantStatus,
+        OperatorKind, VerifierKind,
+    };
+
+    fn make_result(candidate_file: &str, external_files: &[&str]) -> MutantResult {
+        let candidate = crate::model::Candidate {
+            id: MutantId(format!("{candidate_file}::func::op")),
+            file: Utf8PathBuf::from(candidate_file),
+            symbol: "func".into(),
+            kind: CandidateKind::Function,
+            operator: OperatorKind::AddRequiredParameter,
+            line: 1,
+            byte_start: 0,
+            byte_end: 0,
+        };
+        let external_failures = external_files
+            .iter()
+            .map(|f| FailureEvent {
+                mutant_id: candidate.id.clone(),
+                command: VerifierKind::Pytest,
+                file: Utf8PathBuf::from(*f),
+                line: None,
+                column: None,
+                symbol: None,
+                category: FailureCategory::TestAssertion,
+                message: String::new(),
+                scope: FailureScope::External,
+            })
+            .collect();
+        MutantResult {
+            candidate,
+            status: MutantStatus::Breaks,
+            local_failures: vec![],
+            external_failures,
+        }
+    }
+
+    #[test]
+    fn test_is_test_file_with_tests_directory_should_return_true() {
+        let actual = is_test_file(&Utf8PathBuf::from("src/tests/helper.py"));
+        assert!(actual);
+    }
+
+    #[test]
+    fn test_is_test_file_with_test_prefix_in_path_should_return_true() {
+        let actual = is_test_file(&Utf8PathBuf::from("src/test_utils.py"));
+        assert!(actual);
+    }
+
+    #[test]
+    fn test_is_test_file_with_underscore_test_suffix_should_return_true() {
+        let actual = is_test_file(&Utf8PathBuf::from("src/order_test.py"));
+        assert!(actual);
+    }
+
+    #[test]
+    fn test_is_test_file_with_top_level_tests_prefix_should_return_true() {
+        let actual = is_test_file(&Utf8PathBuf::from("tests/test_order.py"));
+        assert!(actual);
+    }
+
+    #[test]
+    fn test_is_test_file_with_source_path_should_return_false() {
+        let actual = is_test_file(&Utf8PathBuf::from("src/domain/order.py"));
+        assert!(!actual);
+    }
+
+    #[test]
+    fn test_build_should_skip_result_with_no_external_failures() {
+        let result = make_result("src/a.py", &[]);
+        let idx = GraphIndex::build(&[result]);
+        assert_eq!(idx.graph.node_count(), 0);
+    }
+
+    #[test]
+    fn test_build_should_add_edge_between_mutated_and_affected_file() {
+        let result = make_result("src/a.py", &["src/b.py"]);
+        let idx = GraphIndex::build(&[result]);
+        assert_eq!(idx.graph.edge_count(), 1);
+    }
+
+    #[test]
+    fn test_build_should_accumulate_edge_weight_for_repeated_failures() {
+        let r1 = make_result("src/a.py", &["src/b.py"]);
+        let r2 = make_result("src/a.py", &["src/b.py"]);
+        let idx = GraphIndex::build(&[r1, r2]);
+        let edge = idx.graph.edge_indices().next().unwrap();
+        assert_eq!(idx.graph[edge].failure_count, 2);
+    }
+}
