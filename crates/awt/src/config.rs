@@ -63,9 +63,7 @@ impl Default for OperatorConfig {
 }
 
 fn num_cpus() -> usize {
-    std::thread::available_parallelism()
-        .map(std::num::NonZero::get)
-        .unwrap_or(4)
+    std::thread::available_parallelism().map_or(4, std::num::NonZero::get)
 }
 
 pub fn load(config_path: Option<&Utf8PathBuf>, repo_root: &Path) -> Result<Config, ConfigError> {

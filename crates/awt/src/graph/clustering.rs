@@ -80,7 +80,7 @@ pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
         })
         .collect();
 
-    unexpected.sort_by(|a, b| b.failure_count.cmp(&a.failure_count));
+    unexpected.sort_by_key(|b| std::cmp::Reverse(b.failure_count));
 
     ClusteringResult {
         centers,
