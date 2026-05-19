@@ -14,6 +14,19 @@ pub struct CenterOfGravity {
     pub heaviest_neighbor: Option<Utf8PathBuf>,
 }
 
+impl CenterOfGravity {
+    fn heaviest_neighbor_is_own_test(&self) -> bool {
+        let Some(stem) = self.file.file_stem() else {
+            return false;
+        };
+        self.heaviest_neighbor.as_ref().is_some_and(|n| {
+            n.file_name().is_some_and(|name| {
+                name == format!("test_{stem}.py") || name == format!("{stem}_test.py")
+            })
+        })
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum RefactorHint {
     ExtractTestFixture,
@@ -139,7 +152,11 @@ pub fn refactor_hints(centers: &[CenterOfGravity]) -> Vec<(Utf8PathBuf, Refactor
                     .as_ref()
                     .map(|p| p.as_str().to_string())
                     .unwrap_or_default();
-                RefactorHint::BrittleCoupling { neighbor }
+                if c.heaviest_neighbor_is_own_test() {
+                    RefactorHint::NoRecommendation
+                } else {
+                    RefactorHint::BrittleCoupling { neighbor }
+                }
             } else if c.edge_count >= BROAD_EDGE_THRESHOLD {
                 RefactorHint::StabilizeApiSurface
             } else {
@@ -271,6 +288,44 @@ mod tests {
             actual,
             vec![(
                 Utf8PathBuf::from("src/a.py"),
+                RefactorHint::NoRecommendation
+            )]
+        );
+    }
+
+    #[test]
+    fn test_heaviest_neighbor_is_own_test_with_test_prefix_should_return_true() {
+        let center = make_center("src/order.py", 0, 1, 1, 1, Some("tests/test_order.py"));
+        assert!(center.heaviest_neighbor_is_own_test());
+    }
+
+    #[test]
+    fn test_heaviest_neighbor_is_own_test_with_test_suffix_should_return_true() {
+        let center = make_center("src/order.py", 0, 1, 1, 1, Some("tests/order_test.py"));
+        assert!(center.heaviest_neighbor_is_own_test());
+    }
+
+    #[test]
+    fn test_heaviest_neighbor_is_own_test_with_unrelated_test_should_return_false() {
+        let center = make_center("src/order.py", 0, 1, 1, 1, Some("tests/test_invoice.py"));
+        assert!(!center.heaviest_neighbor_is_own_test());
+    }
+
+    #[test]
+    fn test_refactor_hints_with_brittle_coupling_to_own_test_should_return_no_recommendation() {
+        let centers = vec![make_center(
+            "src/order.py",
+            2,
+            0,
+            2,
+            10,
+            Some("tests/test_order.py"),
+        )];
+        let actual = refactor_hints(&centers);
+        assert_eq!(
+            actual,
+            vec![(
+                Utf8PathBuf::from("src/order.py"),
                 RefactorHint::NoRecommendation
             )]
         );
