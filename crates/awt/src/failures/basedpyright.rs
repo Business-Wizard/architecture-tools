@@ -35,7 +35,9 @@ struct JsonPosition {
     character: u32,
 }
 
-pub fn run_and_parse(
+/// # Errors
+/// Returns `RunnerError` if the basedpyright subprocess fails to spawn or times out.
+pub async fn run_and_parse(
     mutant_id: &MutantId,
     repo_root: &Path,
     timeout: Duration,
@@ -45,7 +47,8 @@ pub fn run_and_parse(
         &["run", "basedpyright", "--outputjson"],
         repo_root,
         timeout,
-    )?;
+    )
+    .await?;
 
     let Ok(parsed) = serde_json::from_str::<JsonOutput>(&out.stdout) else {
         return Ok(vec![]);

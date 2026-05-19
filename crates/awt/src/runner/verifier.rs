@@ -17,13 +17,16 @@ impl VerifierSet {
         }
     }
 
-    pub fn run_basedpyright(&self, repo: &Path) -> Result<VerifierStatus, RunnerError> {
+    /// # Errors
+    /// Returns `RunnerError` if the basedpyright subprocess fails to spawn or times out.
+    pub async fn run_basedpyright(&self, repo: &Path) -> Result<VerifierStatus, RunnerError> {
         let out = command::run_in(
             "uv",
             &["run", "basedpyright", "--outputjson"],
             repo,
             self.timeout,
-        )?;
+        )
+        .await?;
 
         let include_roots: Vec<std::path::PathBuf> =
             self.include_dirs.iter().map(|d| repo.join(d)).collect();
@@ -46,8 +49,10 @@ impl VerifierSet {
         }
     }
 
-    pub fn run_pytest(&self, repo: &Path) -> Result<VerifierStatus, RunnerError> {
-        let out = command::run_in("uv", &["run", "pytest", "-q"], repo, self.timeout)?;
+    /// # Errors
+    /// Returns `RunnerError` if the pytest subprocess fails to spawn or times out.
+    pub async fn run_pytest(&self, repo: &Path) -> Result<VerifierStatus, RunnerError> {
+        let out = command::run_in("uv", &["run", "pytest", "-q"], repo, self.timeout).await?;
         if out.success() {
             Ok(VerifierStatus::Pass)
         } else {

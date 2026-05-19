@@ -3,7 +3,9 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
-use rayon::prelude::*;
+use tokio::runtime::Runtime;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 use crate::config;
 use crate::discovery;
@@ -51,7 +53,10 @@ pub struct RunArgs {
     #[arg(long, help = "Maximum number of mutants to run")]
     pub max_mutants: Option<usize>,
 
-    #[arg(long, help = "Number of parallel mutation jobs")]
+    #[arg(
+        long,
+        help = "Max concurrent mutation jobs (default: half CPUs, min 2, max 8)"
+    )]
     pub jobs: Option<usize>,
 
     #[arg(long, help = "Keep temp directory when a mutation run fails")]
@@ -113,7 +118,9 @@ fn run_command(args: &RunArgs) {
 
     let verifiers = VerifierSet::new(cfg.timeout_secs, cfg.include_dirs.clone());
 
-    let baseline = run_baseline(&verifiers, &repo_root);
+    let rt = Runtime::new().expect("failed to build tokio runtime");
+
+    let baseline = rt.block_on(run_baseline_async(&verifiers, &repo_root));
 
     if !baseline.all_pass() {
         eprintln!("Baseline:");
@@ -151,25 +158,14 @@ fn run_command(args: &RunArgs) {
         cfg.jobs
     ));
 
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(cfg.jobs)
-        .build()
-        .expect("failed to build rayon pool");
-
-    let keep_on_fail = cfg.keep_temp_on_failure;
-    let timeout = cfg.timeout_secs;
-    let repo_ref = &repo_root;
-
-    let results: Vec<MutantResult> = pool.install(|| {
-        candidates
-            .into_par_iter()
-            .map(|candidate| {
-                let result = run_mutant(candidate, repo_ref, timeout, keep_on_fail);
-                pb.inc(1);
-                result
-            })
-            .collect()
-    });
+    let results = rt.block_on(run_mutants_async(
+        candidates,
+        &repo_root,
+        cfg.timeout_secs,
+        cfg.keep_temp_on_failure,
+        cfg.jobs,
+        Arc::clone(&pb),
+    ));
 
     pb.finish_and_clear();
 
@@ -187,6 +183,120 @@ fn run_command(args: &RunArgs) {
     let report = RunReport::build(&baseline, &results, &cluster_result);
 
     write_outputs(args, &graph_idx, &report);
+}
+
+async fn run_baseline_async(verifiers: &VerifierSet, repo: &std::path::Path) -> BaselineResult {
+    let basedpyright = verifiers
+        .run_basedpyright(repo)
+        .await
+        .unwrap_or_else(|e| VerifierStatus::Fail(vec![format!("runner error: {e}")]));
+    let pytest = verifiers
+        .run_pytest(repo)
+        .await
+        .unwrap_or_else(|e| VerifierStatus::Fail(vec![format!("runner error: {e}")]));
+    BaselineResult {
+        basedpyright,
+        pytest,
+    }
+}
+
+async fn run_mutants_async(
+    candidates: Vec<Candidate>,
+    repo_root: &std::path::Path,
+    timeout_secs: u64,
+    keep_on_fail: bool,
+    jobs: usize,
+    pb: Arc<ProgressBar>,
+) -> Vec<MutantResult> {
+    let sem = Arc::new(Semaphore::new(jobs));
+    let mut join_set: JoinSet<MutantResult> = JoinSet::new();
+
+    for candidate in candidates {
+        let permit = Arc::clone(&sem)
+            .acquire_owned()
+            .await
+            .expect("semaphore closed");
+        let repo = repo_root.to_path_buf();
+        let pb = Arc::clone(&pb);
+
+        join_set.spawn(async move {
+            let _permit = permit; // released when this task completes
+            let result = run_mutant_async(candidate, &repo, timeout_secs, keep_on_fail).await;
+            pb.inc(1);
+            result
+        });
+    }
+
+    let mut results = Vec::with_capacity(join_set.len());
+    while let Some(outcome) = join_set.join_next().await {
+        match outcome {
+            Ok(r) => results.push(r),
+            Err(e) => eprintln!("mutant task panicked: {e}"),
+        }
+    }
+    results
+}
+
+async fn run_mutant_async(
+    candidate: Candidate,
+    repo_root: &std::path::Path,
+    timeout_secs: u64,
+    keep_on_fail: bool,
+) -> MutantResult {
+    let candidate_clone = candidate.clone();
+    let repo = repo_root.to_path_buf();
+
+    let temp = match tokio::task::spawn_blocking(move || prepare_temp(&repo, &candidate_clone))
+        .await
+        .expect("prepare_temp task panicked")
+    {
+        Ok(t) => t,
+        Err(msg) => return invalid(&candidate, &msg),
+    };
+
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let temp_path = temp.path().to_path_buf();
+    let id = &candidate.id;
+
+    let mut all_failures: Vec<FailureEvent> = vec![];
+    all_failures.extend(
+        basedpyright::run_and_parse(id, &temp_path, timeout)
+            .await
+            .unwrap_or_default(),
+    );
+    all_failures.extend(
+        pytest::run_and_parse(id, &temp_path, timeout)
+            .await
+            .unwrap_or_default(),
+    );
+
+    let any_fail = !all_failures.is_empty();
+    let status = if any_fail {
+        MutantStatus::Breaks
+    } else {
+        MutantStatus::Survives
+    };
+
+    if any_fail && keep_on_fail {
+        let _ = temp.keep();
+    }
+
+    let local_failures: Vec<FailureEvent> = all_failures
+        .iter()
+        .filter(|f| f.scope == FailureScope::Local)
+        .cloned()
+        .collect();
+    let external_failures: Vec<FailureEvent> = all_failures
+        .into_iter()
+        .filter(|f| f.scope == FailureScope::External)
+        .collect();
+
+    MutantResult {
+        candidate,
+        status,
+        local_failures,
+        external_failures,
+    }
 }
 
 fn write_outputs(args: &RunArgs, graph_idx: &GraphIndex, report: &RunReport) {
@@ -216,56 +326,6 @@ fn write_outputs(args: &RunArgs, graph_idx: &GraphIndex, report: &RunReport) {
             },
             Err(e) => eprintln!("error reading compare file: {e}"),
         }
-    }
-}
-
-fn run_mutant(
-    candidate: Candidate,
-    repo_root: &std::path::Path,
-    timeout_secs: u64,
-    keep_on_fail: bool,
-) -> MutantResult {
-    let temp = match prepare_temp(repo_root, &candidate) {
-        Ok(t) => t,
-        Err(msg) => {
-            return invalid(&candidate, &msg);
-        }
-    };
-
-    let timeout = std::time::Duration::from_secs(timeout_secs);
-    let temp_path = temp.path().to_path_buf();
-    let id = &candidate.id;
-
-    let mut all_failures: Vec<FailureEvent> = vec![];
-    all_failures.extend(basedpyright::run_and_parse(id, &temp_path, timeout).unwrap_or_default());
-    all_failures.extend(pytest::run_and_parse(id, &temp_path, timeout).unwrap_or_default());
-
-    let any_fail = !all_failures.is_empty();
-    let status = if any_fail {
-        MutantStatus::Breaks
-    } else {
-        MutantStatus::Survives
-    };
-
-    if any_fail && keep_on_fail {
-        let _ = temp.keep();
-    }
-
-    let local_failures: Vec<FailureEvent> = all_failures
-        .iter()
-        .filter(|f| f.scope == FailureScope::Local)
-        .cloned()
-        .collect();
-    let external_failures: Vec<FailureEvent> = all_failures
-        .into_iter()
-        .filter(|f| f.scope == FailureScope::External)
-        .collect();
-
-    MutantResult {
-        candidate,
-        status,
-        local_failures,
-        external_failures,
     }
 }
 
@@ -333,19 +393,6 @@ fn make_runner_failure(_file: &camino::Utf8PathBuf, msg: &str) -> FailureEvent {
         category: FailureCategory::Unknown,
         message: msg.to_string(),
         scope: FailureScope::Local,
-    }
-}
-
-fn run_baseline(verifiers: &VerifierSet, repo: &std::path::Path) -> BaselineResult {
-    let basedpyright = verifiers
-        .run_basedpyright(repo)
-        .unwrap_or_else(|e| VerifierStatus::Fail(vec![format!("runner error: {e}")]));
-    let pytest = verifiers
-        .run_pytest(repo)
-        .unwrap_or_else(|e| VerifierStatus::Fail(vec![format!("runner error: {e}")]));
-    BaselineResult {
-        basedpyright,
-        pytest,
     }
 }
 

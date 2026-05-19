@@ -32,7 +32,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             max_mutants: 500,
-            jobs: num_cpus(),
+            jobs: default_jobs(),
             timeout_secs: 60,
             keep_temp_on_failure: false,
             include_dirs: vec!["src".into()],
@@ -54,8 +54,9 @@ impl Default for OperatorConfig {
     }
 }
 
-fn num_cpus() -> usize {
-    std::thread::available_parallelism().map_or(4, std::num::NonZero::get)
+fn default_jobs() -> usize {
+    let cpus = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+    (cpus / 2).clamp(2, 8)
 }
 
 pub fn load(config_path: Option<&Utf8PathBuf>, repo_root: &Path) -> Result<Config, ConfigError> {

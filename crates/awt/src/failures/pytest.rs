@@ -8,12 +8,14 @@ use crate::model::{
 };
 use crate::runner::command;
 
-pub fn run_and_parse(
+/// # Errors
+/// Returns `RunnerError` if the pytest subprocess fails to spawn or times out.
+pub async fn run_and_parse(
     mutant_id: &MutantId,
     repo_root: &Path,
     timeout: Duration,
 ) -> Result<Vec<FailureEvent>, RunnerError> {
-    let out = command::run_in("uv", &["run", "pytest", "-q"], repo_root, timeout)?;
+    let out = command::run_in("uv", &["run", "pytest", "-q"], repo_root, timeout).await?;
 
     if out.exit_code == 0 {
         return Ok(vec![]);
