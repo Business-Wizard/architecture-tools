@@ -1,18 +1,22 @@
 use comfy_table::{Cell, Table};
 
 use crate::graph::clustering::{ClusteringResult, RefactorHint, refactor_hints};
+use crate::graph::coupling_graph::FileRole;
+use crate::graph::metrics::{MetricsResult, NodeMetrics};
 use crate::model::{BaselineResult, MutantResult, MutantStatus, VerifierStatus};
 
 pub fn print_report(
     baseline: &BaselineResult,
     results: &[MutantResult],
     clustering: &ClusteringResult,
+    metrics: &MetricsResult,
 ) {
     print_baseline_section(baseline);
     print_summary_section(results);
     print_centers_section(clustering);
     print_unexpected_section(clustering);
     print_refactor_section(clustering);
+    print_metrics_section(metrics);
 }
 
 fn print_baseline_section(b: &BaselineResult) {
@@ -75,6 +79,12 @@ fn print_centers_section(clustering: &ClusteringResult) {
     }
 
     println!("{table}");
+    let component_msg = if clustering.component_count == 1 {
+        "all files are tightly interconnected".to_string()
+    } else {
+        format!("{} separate coupling groups", clustering.component_count)
+    };
+    println!("  Coupling: {component_msg}");
 }
 
 fn print_unexpected_section(clustering: &ClusteringResult) {
@@ -122,4 +132,52 @@ fn print_refactor_section(clustering: &ClusteringResult) {
         };
         println!("  • {file}: {text}");
     }
+}
+
+fn print_metrics_section(metrics: &MetricsResult) {
+    let source_nodes: Vec<&NodeMetrics> = metrics
+        .nodes
+        .iter()
+        .filter(|n| n.role == FileRole::Source)
+        .collect();
+
+    if source_nodes.is_empty() {
+        return;
+    }
+
+    println!("\n─── Main Sequence ───────────────────────────────────────");
+
+    let mut table = Table::new();
+    table.load_preset(comfy_table::presets::UTF8_FULL);
+    table.set_header(vec!["File", "Fan-in", "Fan-out", "I", "A", "D", "Status"]);
+
+    for node in source_nodes.iter().take(20) {
+        let fmt_opt = |v: Option<f64>| v.map_or("—".to_string(), |x| format!("{x:.2}"));
+        let status = match (node.distance_failure, node.distance_warning) {
+            (true, _) => "\x1b[31mFAIL\x1b[0m",
+            (_, true) => "\x1b[33mwarn\x1b[0m",
+            _ => "",
+        };
+        table.add_row(vec![
+            Cell::new(node.file.as_str()),
+            Cell::new(node.fan_in.to_string()),
+            Cell::new(node.fan_out.to_string()),
+            Cell::new(fmt_opt(node.instability)),
+            Cell::new(fmt_opt(node.abstractness)),
+            Cell::new(fmt_opt(node.distance)),
+            Cell::new(status),
+        ]);
+    }
+    println!("{table}");
+
+    let warnings = source_nodes
+        .iter()
+        .filter(|n| n.distance_warning && !n.distance_failure)
+        .count();
+    let failures = source_nodes.iter().filter(|n| n.distance_failure).count();
+    let on_sequence = source_nodes
+        .iter()
+        .filter(|n| n.distance.is_some_and(|d| d <= 0.3))
+        .count();
+    println!("  {on_sequence} on main sequence, {warnings} warnings, {failures} failures");
 }

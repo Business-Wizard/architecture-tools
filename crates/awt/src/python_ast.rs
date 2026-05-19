@@ -63,6 +63,18 @@ pub struct ImportInfo {
     pub byte_end: usize,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum ClassKind {
+    Abstract,
+    Protocol,
+    Concrete,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ClassInfo {
+    pub kind: ClassKind,
+}
+
 pub fn find_functions(parsed: &ParsedFile) -> Vec<FunctionInfo> {
     let mut results = Vec::new();
     collect_functions(parsed.root(), &parsed.source, false, &mut results);
@@ -170,6 +182,62 @@ fn inspect_decorators(func_node: Node<'_>, source: &[u8]) -> (bool, bool) {
     (has_overload, has_property)
 }
 
+pub fn find_classes(parsed: &ParsedFile) -> Vec<ClassInfo> {
+    let mut results = Vec::new();
+    collect_classes(parsed.root(), &parsed.source, &mut results);
+    results
+}
+
+fn collect_classes(node: Node<'_>, source: &[u8], out: &mut Vec<ClassInfo>) {
+    if node.kind() == "class_definition" {
+        out.push(extract_class(node, source));
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_classes(child, source, out);
+    }
+}
+
+fn extract_class(node: Node<'_>, source: &[u8]) -> ClassInfo {
+    ClassInfo {
+        kind: classify_class(node, source),
+    }
+}
+
+fn classify_class(node: Node<'_>, source: &[u8]) -> ClassKind {
+    let argument_list = find_argument_list(node);
+
+    if let Some(arg_node) = argument_list {
+        if has_base_with_name(arg_node, source, "Protocol") {
+            return ClassKind::Protocol;
+        }
+        if has_base_with_name(arg_node, source, "ABC") {
+            return ClassKind::Abstract;
+        }
+    }
+
+    ClassKind::Concrete
+}
+
+fn find_argument_list(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find(|child| child.kind() == "argument_list")
+}
+
+fn has_base_with_name(argument_list: Node<'_>, source: &[u8], target_name: &str) -> bool {
+    let mut cursor = argument_list.walk();
+    for child in argument_list.children(&mut cursor) {
+        if let Ok(text) = child.utf8_text(source)
+            && (text == target_name || text.ends_with(&format!(".{target_name}")))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn find_imports(parsed: &ParsedFile) -> Vec<ImportInfo> {
     let mut results = Vec::new();
     collect_imports(parsed.root(), &parsed.source, &mut results);
@@ -193,5 +261,92 @@ fn collect_imports(node: Node<'_>, source: &[u8], out: &mut Vec<ImportInfo>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_imports(child, source, out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_plain_class_should_be_concrete() {
+        let source = b"class Foo: pass";
+        let parsed = ParsedFile::parse(source).expect("parse");
+        let classes = find_classes(&parsed);
+        let expected = vec![ClassInfo {
+            kind: ClassKind::Concrete,
+        }];
+        assert_eq!(classes, expected);
+    }
+
+    #[test]
+    fn test_abc_base_should_be_abstract() {
+        let source = b"class Foo(ABC): pass";
+        let parsed = ParsedFile::parse(source).expect("parse");
+        let classes = find_classes(&parsed);
+        let expected = vec![ClassInfo {
+            kind: ClassKind::Abstract,
+        }];
+        assert_eq!(classes, expected);
+    }
+
+    #[test]
+    fn test_protocol_base_should_be_protocol() {
+        let source = b"class Foo(Protocol): pass";
+        let parsed = ParsedFile::parse(source).expect("parse");
+        let classes = find_classes(&parsed);
+        let expected = vec![ClassInfo {
+            kind: ClassKind::Protocol,
+        }];
+        assert_eq!(classes, expected);
+    }
+
+    #[test]
+    fn test_qualified_abc_base_should_be_abstract() {
+        let source = b"class Foo(abc.ABC): pass";
+        let parsed = ParsedFile::parse(source).expect("parse");
+        let classes = find_classes(&parsed);
+        let expected = vec![ClassInfo {
+            kind: ClassKind::Abstract,
+        }];
+        assert_eq!(classes, expected);
+    }
+
+    #[test]
+    fn test_qualified_protocol_base_should_be_protocol() {
+        let source = b"class Foo(typing.Protocol): pass";
+        let parsed = ParsedFile::parse(source).expect("parse");
+        let classes = find_classes(&parsed);
+        let expected = vec![ClassInfo {
+            kind: ClassKind::Protocol,
+        }];
+        assert_eq!(classes, expected);
+    }
+
+    #[test]
+    fn test_multiple_bases_with_protocol_should_be_protocol() {
+        let source = b"class Foo(Base, Protocol): pass";
+        let parsed = ParsedFile::parse(source).expect("parse");
+        let classes = find_classes(&parsed);
+        let expected = vec![ClassInfo {
+            kind: ClassKind::Protocol,
+        }];
+        assert_eq!(classes, expected);
+    }
+
+    #[test]
+    fn test_multiple_classes_should_return_all() {
+        let source = b"class Foo: pass\nclass Bar(ABC): pass";
+        let parsed = ParsedFile::parse(source).expect("parse");
+        let classes = find_classes(&parsed);
+        let expected = vec![
+            ClassInfo {
+                kind: ClassKind::Concrete,
+            },
+            ClassInfo {
+                kind: ClassKind::Abstract,
+            },
+        ];
+        assert_eq!(classes, expected);
     }
 }

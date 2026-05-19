@@ -11,6 +11,22 @@ pub enum FileRole {
     Test,
 }
 
+impl FileRole {
+    pub fn from_path(path: &Utf8PathBuf) -> Self {
+        let s = path.as_str();
+        if s.contains("/tests/")
+            || s.contains("/test_")
+            || s.ends_with("_test.py")
+            || s.starts_with("tests/")
+            || s.starts_with("test_")
+        {
+            FileRole::Test
+        } else {
+            FileRole::Source
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CouplingNode {
     pub path: Utf8PathBuf,
@@ -39,11 +55,7 @@ impl GraphIndex {
             if let Some(&idx) = map.get(&path) {
                 return idx;
             }
-            let role = if is_test_file(&path) {
-                FileRole::Test
-            } else {
-                FileRole::Source
-            };
+            let role = FileRole::from_path(&path);
             let idx = g.add_node(CouplingNode {
                 path: path.clone(),
                 role,
@@ -82,15 +94,6 @@ impl GraphIndex {
 
         GraphIndex { graph }
     }
-}
-
-fn is_test_file(path: &Utf8PathBuf) -> bool {
-    let s = path.as_str();
-    s.contains("/tests/")
-        || s.contains("/test_")
-        || s.ends_with("_test.py")
-        || s.starts_with("tests/")
-        || s.starts_with("test_")
 }
 
 #[cfg(test)]
@@ -136,32 +139,32 @@ mod tests {
 
     #[test]
     fn test_is_test_file_with_tests_directory_should_return_true() {
-        let actual = is_test_file(&Utf8PathBuf::from("src/tests/helper.py"));
-        assert!(actual);
+        let actual = FileRole::from_path(&Utf8PathBuf::from("src/tests/helper.py"));
+        assert_eq!(actual, FileRole::Test);
     }
 
     #[test]
     fn test_is_test_file_with_test_prefix_in_path_should_return_true() {
-        let actual = is_test_file(&Utf8PathBuf::from("src/test_utils.py"));
-        assert!(actual);
+        let actual = FileRole::from_path(&Utf8PathBuf::from("src/test_utils.py"));
+        assert_eq!(actual, FileRole::Test);
     }
 
     #[test]
     fn test_is_test_file_with_underscore_test_suffix_should_return_true() {
-        let actual = is_test_file(&Utf8PathBuf::from("src/order_test.py"));
-        assert!(actual);
+        let actual = FileRole::from_path(&Utf8PathBuf::from("src/order_test.py"));
+        assert_eq!(actual, FileRole::Test);
     }
 
     #[test]
     fn test_is_test_file_with_top_level_tests_prefix_should_return_true() {
-        let actual = is_test_file(&Utf8PathBuf::from("tests/test_order.py"));
-        assert!(actual);
+        let actual = FileRole::from_path(&Utf8PathBuf::from("tests/test_order.py"));
+        assert_eq!(actual, FileRole::Test);
     }
 
     #[test]
     fn test_is_test_file_with_source_path_should_return_false() {
-        let actual = is_test_file(&Utf8PathBuf::from("src/domain/order.py"));
-        assert!(!actual);
+        let actual = FileRole::from_path(&Utf8PathBuf::from("src/domain/order.py"));
+        assert_eq!(actual, FileRole::Source);
     }
 
     #[test]
