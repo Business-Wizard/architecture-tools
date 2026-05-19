@@ -1,7 +1,7 @@
 use comfy_table::{Cell, Color, Table};
 
-use crate::graph::clustering::{ClusteringResult, RefactorHint, refactor_hints};
 use crate::graph::coupling_graph::FileRole;
+use crate::graph::graph_analysis::{ClusteringResult, RefactorHint, refactor_hints};
 use crate::graph::metrics::{MetricsResult, NodeMetrics};
 use crate::model::{BaselineResult, MutantResult, MutantStatus, VerifierStatus};
 

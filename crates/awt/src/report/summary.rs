@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::graph::clustering::ClusteringResult;
+use crate::graph::graph_analysis::ClusteringResult;
 use crate::model::{BaselineResult, MutantResult, MutantStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

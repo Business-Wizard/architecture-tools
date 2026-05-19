@@ -9,7 +9,7 @@ use crate::config;
 use crate::discovery;
 use crate::failures::{basedpyright, pytest};
 use crate::graph::coupling_graph::GraphIndex;
-use crate::graph::{abstractness, clustering, metrics};
+use crate::graph::{abstractness, graph_analysis, metrics};
 use crate::model::OperatorKind;
 use crate::model::{
     BaselineResult, Candidate, FailureCategory, FailureEvent, FailureScope, MutantResult,
@@ -181,7 +181,7 @@ fn run_command(args: &RunArgs) {
         .collect();
     let abstractness_map = abstractness::compute(&repo_root, &exclude_dirs);
     let metrics_result = metrics::compute(&graph_idx, &abstractness_map);
-    let cluster_result = clustering::analyse(&graph_idx);
+    let cluster_result = graph_analysis::analyse(&graph_idx);
     terminal::print_report(&baseline, &results, &cluster_result, &metrics_result);
 
     let report = RunReport::build(&baseline, &results, &cluster_result);
