@@ -28,6 +28,7 @@ pub fn run_in(
     let output = Command::new(program)
         .args(args)
         .current_dir(cwd)
+        .env_remove("PYTHONPATH")
         .output()
         .map_err(RunnerError::Io)?;
 

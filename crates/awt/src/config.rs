@@ -44,6 +44,7 @@ impl Default for Config {
                 "node_modules".into(),
                 "build".into(),
                 "dist".into(),
+                "mutants".into(),
             ],
             operators: OperatorConfig::default(),
         }
