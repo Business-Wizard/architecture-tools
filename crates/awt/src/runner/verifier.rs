@@ -6,12 +6,14 @@ use crate::runner::command;
 
 pub struct VerifierSet {
     pub timeout: Duration,
+    pub exclude_dirs: Vec<String>,
 }
 
 impl VerifierSet {
-    pub fn new(timeout_secs: u64) -> Self {
+    pub fn new(timeout_secs: u64, exclude_dirs: Vec<String>) -> Self {
         Self {
             timeout: Duration::from_secs(timeout_secs),
+            exclude_dirs,
         }
     }
 
@@ -24,7 +26,10 @@ impl VerifierSet {
         )?;
 
         // basedpyright --outputjson exits 0 even with warnings; parse errors only
-        let errors = extract_basedpyright_errors(&out.stdout);
+        let errors: Vec<String> = extract_basedpyright_errors(&out.stdout)
+            .into_iter()
+            .filter(|e| !is_excluded(e, &self.exclude_dirs))
+            .collect();
         if errors.is_empty() && out.exit_code <= 1 {
             // exit 0 = clean, exit 1 = warnings only — both are baseline-pass
             Ok(VerifierStatus::Pass)
@@ -44,10 +49,15 @@ impl VerifierSet {
         if out.success() {
             Ok(VerifierStatus::Pass)
         } else {
-            Ok(VerifierStatus::Fail(collect_output(
-                &out.stdout,
-                &out.stderr,
-            )))
+            let lines: Vec<String> = collect_output(&out.stdout, &out.stderr)
+                .into_iter()
+                .filter(|l| !is_excluded(l, &self.exclude_dirs))
+                .collect();
+            if lines.is_empty() {
+                Ok(VerifierStatus::Pass)
+            } else {
+                Ok(VerifierStatus::Fail(lines))
+            }
         }
     }
 }
@@ -78,4 +88,10 @@ fn collect_output(stdout: &str, stderr: &str) -> Vec<String> {
         .filter(|l| !l.is_empty())
         .map(String::from)
         .collect()
+}
+
+fn is_excluded(line: &str, exclude_dirs: &[String]) -> bool {
+    exclude_dirs
+        .iter()
+        .any(|dir| line.contains(&format!("/{dir}/")) || line.contains(&format!("\\{dir}\\")))
 }

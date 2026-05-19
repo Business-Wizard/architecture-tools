@@ -111,7 +111,7 @@ fn run_command(args: &RunArgs) {
         cfg.keep_temp_on_failure = true;
     }
 
-    let verifiers = VerifierSet::new(cfg.timeout_secs);
+    let verifiers = VerifierSet::new(cfg.timeout_secs, cfg.exclude_dirs.clone());
 
     let baseline = run_baseline(&verifiers, &repo_root);
 
