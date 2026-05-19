@@ -1,6 +1,6 @@
 use comfy_table::{Cell, Table};
 
-use crate::graph::clustering::{ClusteringResult, refactor_hints};
+use crate::graph::clustering::{ClusteringResult, RefactorHint, refactor_hints};
 use crate::model::{BaselineResult, MutantResult, MutantStatus, VerifierStatus};
 
 pub fn print_report(
@@ -111,7 +111,21 @@ fn print_refactor_section(clustering: &ClusteringResult) {
     }
 
     println!("\n─── Refactor Areas ──────────────────────────────────────");
-    for hint in &hints {
-        println!("  • {hint}");
+    for (file, hint) in &hints {
+        let text = match hint {
+            RefactorHint::ExtractTestFixture => {
+                "only test files break — extract a shared test fixture or stub".to_string()
+            }
+            RefactorHint::BrittleCoupling { neighbor } => {
+                format!("brittle coupling — consider decoupling from {neighbor}")
+            }
+            RefactorHint::StabilizeApiSurface => {
+                "many files depend on this — stabilize and document the public API".to_string()
+            }
+            RefactorHint::NoRecommendation => {
+                "no clear recommendation — inspect manually".to_string()
+            }
+        };
+        println!("  • {file}: {text}");
     }
 }

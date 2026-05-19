@@ -9,6 +9,17 @@ pub struct CenterOfGravity {
     pub file: Utf8PathBuf,
     pub affected_source_code: usize,
     pub affected_test_code: usize,
+    pub edge_count: usize,
+    pub total_failure_count: usize,
+    pub heaviest_neighbor: Option<Utf8PathBuf>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RefactorHint {
+    ExtractTestFixture,
+    BrittleCoupling { neighbor: String },
+    StabilizeApiSurface,
+    NoRecommendation,
 }
 
 #[derive(Debug)]
@@ -40,18 +51,31 @@ pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
             }
             let mut source_code = 0usize;
             let mut test_code = 0usize;
+            let mut total_failure_count = 0usize;
+            let mut heaviest_neighbor: Option<(usize, Utf8PathBuf)> = None;
             for e in &edges {
                 let target = &idx.graph[e.target()];
+                let failures = e.weight().failure_count;
                 if target.role == FileRole::Test {
                     test_code += 1;
                 } else {
                     source_code += 1;
+                }
+                total_failure_count += failures;
+                if heaviest_neighbor
+                    .as_ref()
+                    .is_none_or(|(max, _)| failures > *max)
+                {
+                    heaviest_neighbor = Some((failures, target.path.clone()));
                 }
             }
             Some(CenterOfGravity {
                 file: node.path.clone(),
                 affected_source_code: source_code,
                 affected_test_code: test_code,
+                edge_count: edges.len(),
+                total_failure_count,
+                heaviest_neighbor: heaviest_neighbor.map(|(_, p)| p),
             })
         })
         .collect();
@@ -96,16 +120,32 @@ fn top_package(path: &Utf8PathBuf) -> String {
         .unwrap_or_default()
 }
 
-pub fn refactor_hints(centers: &[CenterOfGravity]) -> Vec<String> {
+const BRITTLE_AVG_THRESHOLD: usize = 4;
+const BROAD_EDGE_THRESHOLD: usize = 6;
+
+pub fn refactor_hints(centers: &[CenterOfGravity]) -> Vec<(Utf8PathBuf, RefactorHint)> {
     centers
         .iter()
         .take(5)
         .map(|c| {
-            let total = c.affected_source_code + c.affected_test_code;
-            format!(
-                "{}: {} callers across {} source + {} test files — consider extracting an interface",
-                c.file, total, c.affected_source_code, c.affected_test_code
-            )
+            let hint = if c.affected_source_code == 0 && c.affected_test_code > 0 {
+                RefactorHint::ExtractTestFixture
+            } else if c.edge_count > 0
+                && c.edge_count <= 3
+                && c.total_failure_count / c.edge_count >= BRITTLE_AVG_THRESHOLD
+            {
+                let neighbor = c
+                    .heaviest_neighbor
+                    .as_ref()
+                    .map(|p| p.as_str().to_string())
+                    .unwrap_or_default();
+                RefactorHint::BrittleCoupling { neighbor }
+            } else if c.edge_count >= BROAD_EDGE_THRESHOLD {
+                RefactorHint::StabilizeApiSurface
+            } else {
+                RefactorHint::NoRecommendation
+            };
+            (c.file.clone(), hint)
         })
         .collect()
 }
@@ -155,17 +195,85 @@ mod tests {
         assert_eq!(actual, "");
     }
 
+    fn make_center(
+        file: &str,
+        source: usize,
+        test: usize,
+        edge_count: usize,
+        total_failures: usize,
+        heaviest: Option<&str>,
+    ) -> CenterOfGravity {
+        CenterOfGravity {
+            file: Utf8PathBuf::from(file),
+            affected_source_code: source,
+            affected_test_code: test,
+            edge_count,
+            total_failure_count: total_failures,
+            heaviest_neighbor: heaviest.map(Utf8PathBuf::from),
+        }
+    }
+
     #[test]
     fn test_refactor_hints_should_cap_at_five_entries() {
         let centers: Vec<CenterOfGravity> = (0..7)
-            .map(|i| CenterOfGravity {
-                file: Utf8PathBuf::from(format!("src/file{i}.py")),
-                affected_source_code: 1,
-                affected_test_code: 0,
-            })
+            .map(|i| make_center(&format!("src/file{i}.py"), 1, 0, 1, 1, None))
             .collect();
         let actual = refactor_hints(&centers);
         assert_eq!(actual.len(), 5);
+    }
+
+    #[test]
+    fn test_refactor_hints_with_test_only_coupling_should_suggest_extract_fixture() {
+        let centers = vec![make_center("src/a.py", 0, 3, 3, 9, None)];
+        let actual = refactor_hints(&centers);
+        assert_eq!(
+            actual,
+            vec![(
+                Utf8PathBuf::from("src/a.py"),
+                RefactorHint::ExtractTestFixture
+            )]
+        );
+    }
+
+    #[test]
+    fn test_refactor_hints_with_high_avg_failures_should_suggest_brittle_coupling() {
+        let centers = vec![make_center("src/a.py", 2, 0, 2, 10, Some("src/b.py"))];
+        let actual = refactor_hints(&centers);
+        assert_eq!(
+            actual,
+            vec![(
+                Utf8PathBuf::from("src/a.py"),
+                RefactorHint::BrittleCoupling {
+                    neighbor: "src/b.py".to_string()
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn test_refactor_hints_with_many_edges_should_suggest_stabilize_api() {
+        let centers = vec![make_center("src/a.py", 4, 2, 8, 8, None)];
+        let actual = refactor_hints(&centers);
+        assert_eq!(
+            actual,
+            vec![(
+                Utf8PathBuf::from("src/a.py"),
+                RefactorHint::StabilizeApiSurface
+            )]
+        );
+    }
+
+    #[test]
+    fn test_refactor_hints_with_no_clear_signal_should_return_no_recommendation() {
+        let centers = vec![make_center("src/a.py", 2, 1, 3, 3, None)];
+        let actual = refactor_hints(&centers);
+        assert_eq!(
+            actual,
+            vec![(
+                Utf8PathBuf::from("src/a.py"),
+                RefactorHint::NoRecommendation
+            )]
+        );
     }
 
     #[test]
