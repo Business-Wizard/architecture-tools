@@ -11,7 +11,6 @@ const EXCLUDE_DIRS: &[&str] = &[
     "__pycache__",
     ".mypy_cache",
     ".pytest_cache",
-    ".ruff_cache",
     "node_modules",
 ];
 

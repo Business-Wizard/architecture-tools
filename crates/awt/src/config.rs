@@ -41,7 +41,6 @@ impl Default for Config {
                 "__pycache__".into(),
                 ".mypy_cache".into(),
                 ".pytest_cache".into(),
-                ".ruff_cache".into(),
                 "node_modules".into(),
             ],
             operators: OperatorConfig::default(),
