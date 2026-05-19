@@ -1,5 +1,4 @@
 use camino::Utf8PathBuf;
-use petgraph::algo::connected_components;
 use petgraph::visit::EdgeRef;
 
 use crate::graph::coupling_graph::{FileRole, GraphIndex};
@@ -46,12 +45,9 @@ pub struct UnexpectedCoupling {
 pub struct ClusteringResult {
     pub centers: Vec<CenterOfGravity>,
     pub unexpected: Vec<UnexpectedCoupling>,
-    pub component_count: usize,
 }
 
 pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
-    let component_count = connected_components(&idx.graph);
-
     // Centers of gravity: nodes with highest out-degree (by distinct affected files)
     let mut centers: Vec<CenterOfGravity> = idx
         .graph
@@ -122,7 +118,6 @@ pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
     ClusteringResult {
         centers,
         unexpected,
-        component_count,
     }
 }
 
