@@ -12,7 +12,7 @@ pub struct Config {
     pub jobs: usize,
     pub timeout_secs: u64,
     pub keep_temp_on_failure: bool,
-    pub exclude_dirs: Vec<String>,
+    pub include_dirs: Vec<String>,
     pub operators: OperatorConfig,
 }
 
@@ -35,17 +35,7 @@ impl Default for Config {
             jobs: num_cpus(),
             timeout_secs: 60,
             keep_temp_on_failure: false,
-            exclude_dirs: vec![
-                ".git".into(),
-                ".venv".into(),
-                "__pycache__".into(),
-                ".mypy_cache".into(),
-                ".pytest_cache".into(),
-                "node_modules".into(),
-                "build".into(),
-                "dist".into(),
-                "mutants".into(),
-            ],
+            include_dirs: vec!["src".into()],
             operators: OperatorConfig::default(),
         }
     }

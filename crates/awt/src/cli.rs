@@ -111,7 +111,7 @@ fn run_command(args: &RunArgs) {
         cfg.keep_temp_on_failure = true;
     }
 
-    let verifiers = VerifierSet::new(cfg.timeout_secs, cfg.exclude_dirs.clone());
+    let verifiers = VerifierSet::new(cfg.timeout_secs, cfg.include_dirs.clone());
 
     let baseline = run_baseline(&verifiers, &repo_root);
 
@@ -174,12 +174,12 @@ fn run_command(args: &RunArgs) {
     pb.finish_and_clear();
 
     let graph_idx = GraphIndex::build(&results);
-    let exclude_dirs: Vec<Utf8PathBuf> = cfg
-        .exclude_dirs
+    let include_dirs: Vec<Utf8PathBuf> = cfg
+        .include_dirs
         .iter()
         .map(|s| Utf8PathBuf::from(s.as_str()))
         .collect();
-    let abstractness_map = abstractness::compute(&repo_root, &exclude_dirs);
+    let abstractness_map = abstractness::compute(&repo_root, &include_dirs);
     let metrics_result = metrics::compute(&graph_idx, &abstractness_map);
     let cluster_result = graph_analysis::analyse(&graph_idx);
     terminal::print_report(&baseline, &results, &cluster_result, &metrics_result);

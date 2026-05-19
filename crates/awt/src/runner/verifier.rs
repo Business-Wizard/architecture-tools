@@ -6,14 +6,14 @@ use crate::runner::command;
 
 pub struct VerifierSet {
     pub timeout: Duration,
-    pub exclude_dirs: Vec<String>,
+    pub include_dirs: Vec<String>,
 }
 
 impl VerifierSet {
-    pub fn new(timeout_secs: u64, exclude_dirs: Vec<String>) -> Self {
+    pub fn new(timeout_secs: u64, include_dirs: Vec<String>) -> Self {
         Self {
             timeout: Duration::from_secs(timeout_secs),
-            exclude_dirs,
+            include_dirs,
         }
     }
 
@@ -25,10 +25,12 @@ impl VerifierSet {
             self.timeout,
         )?;
 
+        let include_roots: Vec<std::path::PathBuf> =
+            self.include_dirs.iter().map(|d| repo.join(d)).collect();
         // basedpyright --outputjson exits 0 even with warnings; parse errors only
         let errors: Vec<String> = extract_basedpyright_errors(&out.stdout)
             .into_iter()
-            .filter(|e| !is_excluded(e, &self.exclude_dirs))
+            .filter(|e| is_in_include_roots(e, &include_roots))
             .collect();
         if errors.is_empty() && out.exit_code <= 1 {
             // exit 0 = clean, exit 1 = warnings only — both are baseline-pass
@@ -49,15 +51,10 @@ impl VerifierSet {
         if out.success() {
             Ok(VerifierStatus::Pass)
         } else {
-            let lines: Vec<String> = collect_output(&out.stdout, &out.stderr)
-                .into_iter()
-                .filter(|l| !is_excluded(l, &self.exclude_dirs))
-                .collect();
-            if lines.is_empty() {
-                Ok(VerifierStatus::Pass)
-            } else {
-                Ok(VerifierStatus::Fail(lines))
-            }
+            Ok(VerifierStatus::Fail(extract_pytest_failures(
+                &out.stdout,
+                &out.stderr,
+            )))
         }
     }
 }
@@ -90,8 +87,24 @@ fn collect_output(stdout: &str, stderr: &str) -> Vec<String> {
         .collect()
 }
 
-fn is_excluded(line: &str, exclude_dirs: &[String]) -> bool {
-    exclude_dirs
+fn extract_pytest_failures(stdout: &str, stderr: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .chain(stderr.lines())
+        .filter(|l| {
+            let t = l.trim_start();
+            t.starts_with("FAILED ")
+                || t.starts_with("ERROR ")
+                || t.starts_with("short test summary")
+                || t.starts_with("= FAILURES")
+                || t.starts_with("= ERRORS")
+        })
+        .map(String::from)
+        .collect()
+}
+
+fn is_in_include_roots(line: &str, include_roots: &[std::path::PathBuf]) -> bool {
+    include_roots
         .iter()
-        .any(|dir| line.contains(&format!("/{dir}/")) || line.contains(&format!("\\{dir}\\")))
+        .any(|root| line.starts_with(root.to_string_lossy().as_ref()))
 }

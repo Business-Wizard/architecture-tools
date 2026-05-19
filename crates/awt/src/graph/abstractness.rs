@@ -38,15 +38,19 @@ pub struct AbstractnessMap {
     pub by_file: HashMap<Utf8PathBuf, AbstractnessScore>,
 }
 
-pub fn compute(repo_root: &Path, exclude_dirs: &[Utf8PathBuf]) -> AbstractnessMap {
+pub fn compute(repo_root: &Path, include_dirs: &[Utf8PathBuf]) -> AbstractnessMap {
     let mut by_file = HashMap::new();
 
-    let exclude_dirs_owned: Vec<Utf8PathBuf> = exclude_dirs.to_vec();
+    let repo_root_owned = repo_root.to_path_buf();
+    let include_roots: Vec<std::path::PathBuf> = include_dirs
+        .iter()
+        .map(|d| repo_root.join(d.as_std_path()))
+        .collect();
     let walker = WalkBuilder::new(repo_root)
         .hidden(false)
         .filter_entry(move |e| {
-            let name = e.file_name().to_string_lossy();
-            !exclude_dirs_owned.iter().any(|ex| name == ex.as_str())
+            let p = e.path();
+            p == repo_root_owned || include_roots.iter().any(|root| p.starts_with(root))
         })
         .build();
 

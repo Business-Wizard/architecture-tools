@@ -25,12 +25,14 @@ pub fn discover(repo_root: &Path, cfg: &Config) -> DiscoveryResult {
     let mut candidates = Vec::new();
     let mut counts = CandidateCounts::default();
 
-    let exclude_dirs = cfg.exclude_dirs.clone();
+    let repo_root_owned = repo_root.to_path_buf();
+    let include_roots: Vec<std::path::PathBuf> =
+        cfg.include_dirs.iter().map(|d| repo_root.join(d)).collect();
     let walker = WalkBuilder::new(repo_root)
         .hidden(false)
         .filter_entry(move |e| {
-            let name = e.file_name().to_string_lossy();
-            !exclude_dirs.iter().any(|ex| name == ex.as_str())
+            let p = e.path();
+            p == repo_root_owned || include_roots.iter().any(|root| p.starts_with(root))
         })
         .build();
 
