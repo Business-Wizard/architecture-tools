@@ -142,6 +142,9 @@ dmypy.json
 # Mac OS files
 *.DS_Store
 
+# awt output files
+coupling.dot
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 .beads/embeddeddolt/
