@@ -1,4 +1,4 @@
-use comfy_table::{Cell, Table};
+use comfy_table::{Cell, Color, Table};
 
 use crate::graph::clustering::{ClusteringResult, RefactorHint, refactor_hints};
 use crate::graph::coupling_graph::FileRole;
@@ -149,14 +149,16 @@ fn print_metrics_section(metrics: &MetricsResult) {
 
     let mut table = Table::new();
     table.load_preset(comfy_table::presets::UTF8_FULL);
-    table.set_header(vec!["File", "Fan-in", "Fan-out", "I", "A", "D", "Status"]);
+    table.set_header(vec![
+        "File", "Fan-in", "Fan-out", "Inst", "Abst", "Dist", "Status",
+    ]);
 
     for node in source_nodes.iter().take(20) {
         let fmt_opt = |v: Option<f64>| v.map_or("—".to_string(), |x| format!("{x:.2}"));
-        let status = match (node.distance_failure, node.distance_warning) {
-            (true, _) => "\x1b[31mFAIL\x1b[0m",
-            (_, true) => "\x1b[33mwarn\x1b[0m",
-            _ => "",
+        let status_cell = match (node.distance_failure, node.distance_warning) {
+            (true, _) => Cell::new("FAIL").fg(Color::Red),
+            (_, true) => Cell::new("warn").fg(Color::Yellow),
+            _ => Cell::new(""),
         };
         table.add_row(vec![
             Cell::new(node.file.as_str()),
@@ -165,7 +167,7 @@ fn print_metrics_section(metrics: &MetricsResult) {
             Cell::new(fmt_opt(node.instability)),
             Cell::new(fmt_opt(node.abstractness)),
             Cell::new(fmt_opt(node.distance)),
-            Cell::new(status),
+            status_cell,
         ]);
     }
     println!("{table}");
