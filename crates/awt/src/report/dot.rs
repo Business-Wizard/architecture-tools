@@ -30,29 +30,32 @@ fn penwidth(count: usize) -> f32 {
 
 fn render(idx: &GraphIndex) -> String {
     let cycles = cycle_nodes(idx);
+    let source_nodes: HashSet<NodeIndex> = idx
+        .graph
+        .node_indices()
+        .filter(|&n| idx.graph[n].role == FileRole::Source)
+        .collect();
+
     let mut out = String::new();
     writeln!(out, "digraph coupling {{").unwrap();
     writeln!(out, "    rankdir=LR;").unwrap();
 
-    for n in idx.graph.node_indices() {
+    for &n in &source_nodes {
         let node = &idx.graph[n];
         let label = node.path.as_str().replace('"', "\\\"");
-        let in_cycle = cycles.contains(&n);
-
-        let attrs = match (&node.role, in_cycle) {
-            (FileRole::Test, false) => "shape=ellipse style=dashed".to_string(),
-            (FileRole::Test, true) => {
-                "shape=ellipse style=\"dashed,filled\" fillcolor=lightcoral".to_string()
-            }
-            (FileRole::Source, false) => "shape=box".to_string(),
-            (FileRole::Source, true) => "shape=box style=filled fillcolor=lightcoral".to_string(),
+        let attrs = if cycles.contains(&n) {
+            "shape=box style=filled fillcolor=lightcoral"
+        } else {
+            "shape=box"
         };
-
         writeln!(out, "    {} [{attrs} label=\"{label}\"];", n.index()).unwrap();
     }
 
     for e in idx.graph.edge_indices() {
         let (src, dst) = idx.graph.edge_endpoints(e).unwrap();
+        if !source_nodes.contains(&src) || !source_nodes.contains(&dst) {
+            continue;
+        }
         let count = idx.graph[e].failure_count;
         let pw = penwidth(count);
         writeln!(
@@ -111,35 +114,44 @@ mod tests {
         }
     }
 
-    fn fixture_idx() -> GraphIndex {
+    fn fixture_source_only() -> GraphIndex {
+        GraphIndex::build(&[make_result("src/domain.py", &["src/service.py"])])
+    }
+
+    fn fixture_source_to_test() -> GraphIndex {
         GraphIndex::build(&[make_result("src/domain.py", &["tests/test_domain.py"])])
     }
 
     #[test]
-    fn test_render_should_produce_valid_dot_with_nodes_and_edges() {
-        let dot = render(&fixture_idx());
+    fn test_render_should_produce_valid_dot_with_source_nodes_and_edges() {
+        let dot = render(&fixture_source_only());
         assert!(dot.contains("digraph coupling {"));
         assert!(dot.contains("src/domain.py"));
-        assert!(dot.contains("tests/test_domain.py"));
+        assert!(dot.contains("src/service.py"));
         assert!(dot.contains("->"));
     }
 
     #[test]
-    fn test_test_file_should_use_dashed_ellipse() {
-        let dot = render(&fixture_idx());
-        assert!(dot.contains("style=dashed"));
-        assert!(dot.contains("shape=ellipse"));
+    fn test_render_should_exclude_test_nodes_from_dot() {
+        let dot = render(&fixture_source_to_test());
+        assert!(!dot.contains("tests/test_domain.py"));
+    }
+
+    #[test]
+    fn test_render_should_exclude_edges_to_test_nodes() {
+        let dot = render(&fixture_source_to_test());
+        assert!(!dot.contains("->"));
     }
 
     #[test]
     fn test_source_file_should_use_box_shape() {
-        let dot = render(&fixture_idx());
+        let dot = render(&fixture_source_only());
         assert!(dot.contains("shape=box"));
     }
 
     #[test]
     fn test_edge_should_have_penwidth() {
-        let dot = render(&fixture_idx());
+        let dot = render(&fixture_source_only());
         assert!(dot.contains("penwidth="));
     }
 
