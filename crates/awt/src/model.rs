@@ -280,8 +280,8 @@ pub enum ViolationDetail {
     },
     DistanceViolation {
         file: Utf8PathBuf,
-        abstractness: Option<f64>,
-        instability: Option<f64>,
+        abstractness: f64,
+        instability: f64,
         distance: f64,
         band: DistanceBand,
     },

@@ -10,9 +10,9 @@ pub struct NodeMetrics {
     pub role: FileRole,
     pub fan_in: usize,
     pub fan_out: usize,
-    pub instability: Option<f64>,
-    pub abstractness: Option<f64>,
-    pub distance: Option<f64>,
+    pub instability: f64,
+    pub abstractness: f64,
+    pub distance: f64,
     pub distance_warning: bool,
     pub distance_failure: bool,
 }
@@ -31,22 +31,25 @@ pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResul
             let fan_out = idx.graph.edges_directed(n, Direction::Outgoing).count();
             let fan_in = idx.graph.edges_directed(n, Direction::Incoming).count();
 
+            // Isolated nodes (no edges) default to I=1.0: no-abstractions + maximally-unstable
+            // sits on the main sequence (distance=0), avoiding false violations.
+            #[allow(clippy::cast_precision_loss)]
             let instability = if fan_in + fan_out == 0 {
-                None
+                1.0
             } else {
-                #[allow(clippy::cast_precision_loss)]
-                Some(fan_out as f64 / (fan_in + fan_out) as f64)
+                fan_out as f64 / (fan_in + fan_out) as f64
             };
 
-            let abstractness_val = abstractness.by_file.get(&node.path).and_then(|s| s.value);
+            // Files with no class definitions default to A=0.0 (fully concrete).
+            let abstractness = abstractness
+                .by_file
+                .get(&node.path)
+                .and_then(|s| s.value)
+                .unwrap_or(0.0);
 
-            let distance = match (instability, abstractness_val) {
-                (Some(i), Some(a)) => Some((a + i - 1.0).abs()),
-                _ => None,
-            };
-
-            let distance_warning = distance.is_some_and(|d| d > 0.3);
-            let distance_failure = distance.is_some_and(|d| d > 0.5);
+            let distance = (abstractness + instability - 1.0).abs();
+            let distance_warning = distance > 0.3;
+            let distance_failure = distance > 0.5;
 
             NodeMetrics {
                 file: node.path.clone(),
@@ -54,7 +57,7 @@ pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResul
                 fan_in,
                 fan_out,
                 instability,
-                abstractness: abstractness_val,
+                abstractness,
                 distance,
                 distance_warning,
                 distance_failure,
@@ -63,14 +66,9 @@ pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResul
         .collect();
 
     nodes.sort_by(|a, b| {
-        let a_dist = a.distance;
-        let b_dist = b.distance;
-        match (a_dist, b_dist) {
-            (Some(ad), Some(bd)) => bd.partial_cmp(&ad).unwrap_or(std::cmp::Ordering::Equal),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        }
+        b.distance
+            .partial_cmp(&a.distance)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     MetricsResult { nodes }
@@ -78,6 +76,7 @@ pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResul
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::float_cmp)]
     use super::*;
     use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode};
     use std::collections::HashMap;
@@ -110,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn test_isolated_node_should_have_none_instability() {
+    fn test_isolated_node_should_have_instability_one() {
         let abstractness = empty_abstractness();
 
         let mut graph = CouplingGraph::new();
@@ -128,7 +127,7 @@ mod tests {
             .find(|n| n.file.as_str() == "src/isolated.py")
             .expect("node should exist");
 
-        assert_eq!(isolated.instability, None);
+        assert_eq!(isolated.instability, 1.0);
     }
 
     #[test]
@@ -143,7 +142,7 @@ mod tests {
             .find(|n| n.file.as_str() == "src/hub.py")
             .expect("node should exist");
 
-        assert_eq!(hub.instability, Some(1.0));
+        assert_eq!(hub.instability, 1.0);
     }
 
     #[test]
@@ -161,7 +160,7 @@ mod tests {
             .find(|n| n.file.as_str() == "src/consumer.py")
             .expect("node should exist");
 
-        assert_eq!(consumer.instability, Some(0.0));
+        assert_eq!(consumer.instability, 0.0);
     }
 
     #[test]
@@ -179,7 +178,7 @@ mod tests {
             .find(|n| n.file.as_str() == "src/balanced.py")
             .expect("node should exist");
 
-        assert_eq!(balanced.instability, Some(0.5));
+        assert_eq!(balanced.instability, 0.5);
     }
 
     #[test]
@@ -189,9 +188,9 @@ mod tests {
             role: FileRole::Source,
             fan_in: 1,
             fan_out: 1,
-            instability: Some(0.5),
-            abstractness: None,
-            distance: Some(0.4),
+            instability: 0.5,
+            abstractness: 0.0,
+            distance: 0.4,
             distance_warning: true,
             distance_failure: false,
         };
@@ -207,9 +206,9 @@ mod tests {
             role: FileRole::Source,
             fan_in: 1,
             fan_out: 1,
-            instability: Some(0.5),
-            abstractness: None,
-            distance: Some(0.6),
+            instability: 0.5,
+            abstractness: 0.0,
+            distance: 0.6,
             distance_warning: true,
             distance_failure: true,
         };
@@ -219,21 +218,17 @@ mod tests {
     }
 
     #[test]
-    fn test_none_abstractness_should_give_none_distance() {
-        let metrics = NodeMetrics {
-            file: Utf8PathBuf::from("src/test.py"),
-            role: FileRole::Source,
-            fan_in: 1,
-            fan_out: 1,
-            instability: Some(0.5),
-            abstractness: None,
-            distance: None,
-            distance_warning: false,
-            distance_failure: false,
-        };
+    fn test_no_class_definitions_should_default_abstractness_to_zero() {
+        let idx = make_graph_index(&[("src/a.py", "src/concrete.py")]);
+        let abstractness = empty_abstractness();
+        let result = compute(&idx, &abstractness);
 
-        assert!(metrics.distance.is_none());
-        assert!(!metrics.distance_warning);
-        assert!(!metrics.distance_failure);
+        let node = result
+            .nodes
+            .iter()
+            .find(|n| n.file.as_str() == "src/concrete.py")
+            .expect("node should exist");
+
+        assert_eq!(node.abstractness, 0.0);
     }
 }

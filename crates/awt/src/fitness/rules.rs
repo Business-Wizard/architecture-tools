@@ -87,7 +87,7 @@ pub fn sdp_stable_dependencies(
     let instability_map: HashMap<Utf8PathBuf, f64> = metrics
         .nodes
         .iter()
-        .filter_map(|n| n.instability.map(|i| (n.file.clone(), i)))
+        .map(|n| (n.file.clone(), n.instability))
         .collect();
 
     let mut violations = vec![];
@@ -141,9 +141,7 @@ pub fn main_sequence_distance(metrics: &MetricsResult, config: &FitnessConfig) -
         if node.role != FileRole::Source {
             continue;
         }
-        let Some(d) = node.distance else {
-            continue;
-        };
+        let d = node.distance;
 
         let band = if d > config.main_sequence.error_threshold {
             DistanceBand::Error
@@ -284,8 +282,7 @@ mod tests {
         GraphIndex { graph }
     }
 
-    #[allow(clippy::type_complexity)]
-    fn make_metrics(nodes: &[(&str, Option<f64>, Option<f64>, Option<f64>)]) -> MetricsResult {
+    fn make_metrics(nodes: &[(&str, f64, f64, f64)]) -> MetricsResult {
         MetricsResult {
             nodes: nodes
                 .iter()
@@ -297,8 +294,8 @@ mod tests {
                     instability: *i,
                     abstractness: *a,
                     distance: *d,
-                    distance_warning: d.is_some_and(|x| x > 0.3),
-                    distance_failure: d.is_some_and(|x| x > 0.5),
+                    distance_warning: *d > 0.3,
+                    distance_failure: *d > 0.5,
                 })
                 .collect(),
         }
@@ -429,10 +426,7 @@ mod tests {
     #[test]
     fn test_sdp_unstable_dependency_should_produce_violation() {
         let idx = make_graph(&[("src/a.py", "src/b.py")]);
-        let metrics = make_metrics(&[
-            ("src/a.py", Some(0.2), None, None),
-            ("src/b.py", Some(0.8), None, None),
-        ]);
+        let metrics = make_metrics(&[("src/a.py", 0.2, 0.0, 0.8), ("src/b.py", 0.8, 0.0, 0.2)]);
         let config = sdp_enabled();
         let actual = sdp_stable_dependencies(&idx, &metrics, &config);
         assert_eq!(actual.len(), 1);
@@ -442,10 +436,7 @@ mod tests {
     #[test]
     fn test_sdp_stable_dependency_should_produce_no_violation() {
         let idx = make_graph(&[("src/a.py", "src/b.py")]);
-        let metrics = make_metrics(&[
-            ("src/a.py", Some(0.8), None, None),
-            ("src/b.py", Some(0.2), None, None),
-        ]);
+        let metrics = make_metrics(&[("src/a.py", 0.8, 0.0, 0.2), ("src/b.py", 0.2, 0.0, 0.8)]);
         let config = sdp_enabled();
         let actual = sdp_stable_dependencies(&idx, &metrics, &config);
         assert_eq!(actual.len(), 0);
@@ -454,22 +445,16 @@ mod tests {
     #[test]
     fn test_sdp_equal_instability_within_epsilon_should_produce_no_violation() {
         let idx = make_graph(&[("src/a.py", "src/b.py")]);
-        let metrics = make_metrics(&[
-            ("src/a.py", Some(0.5), None, None),
-            ("src/b.py", Some(0.5), None, None),
-        ]);
+        let metrics = make_metrics(&[("src/a.py", 0.5, 0.0, 0.5), ("src/b.py", 0.5, 0.0, 0.5)]);
         let config = sdp_enabled();
         let actual = sdp_stable_dependencies(&idx, &metrics, &config);
         assert_eq!(actual.len(), 0);
     }
 
     #[test]
-    fn test_sdp_missing_instability_should_produce_no_violation() {
+    fn test_sdp_isolated_nodes_should_produce_no_violation() {
         let idx = make_graph(&[("src/a.py", "src/b.py")]);
-        let metrics = make_metrics(&[
-            ("src/a.py", None, None, None),
-            ("src/b.py", None, None, None),
-        ]);
+        let metrics = make_metrics(&[("src/a.py", 1.0, 0.0, 0.0), ("src/b.py", 1.0, 0.0, 0.0)]);
         let config = sdp_enabled();
         let actual = sdp_stable_dependencies(&idx, &metrics, &config);
         assert_eq!(actual.len(), 0);
@@ -478,10 +463,7 @@ mod tests {
     #[test]
     fn test_sdp_disabled_should_produce_no_violations() {
         let idx = make_graph(&[("src/a.py", "src/b.py")]);
-        let metrics = make_metrics(&[
-            ("src/a.py", Some(0.2), None, None),
-            ("src/b.py", Some(0.8), None, None),
-        ]);
+        let metrics = make_metrics(&[("src/a.py", 0.2, 0.0, 0.8), ("src/b.py", 0.8, 0.0, 0.2)]);
         let config = FitnessConfig {
             sdp: SdpConfig { enabled: false },
             ..sdp_enabled()
@@ -494,7 +476,7 @@ mod tests {
 
     #[test]
     fn test_main_sequence_high_distance_should_produce_error() {
-        let metrics = make_metrics(&[("src/a.py", Some(0.5), Some(0.5), Some(0.6))]);
+        let metrics = make_metrics(&[("src/a.py", 0.5, 0.5, 0.6)]);
         let config = ms_enabled();
         let actual = main_sequence_distance(&metrics, &config);
         assert_eq!(actual.len(), 1);
@@ -503,7 +485,7 @@ mod tests {
 
     #[test]
     fn test_main_sequence_warning_distance_should_produce_warning() {
-        let metrics = make_metrics(&[("src/a.py", Some(0.5), Some(0.5), Some(0.4))]);
+        let metrics = make_metrics(&[("src/a.py", 0.5, 0.5, 0.4)]);
         let config = ms_enabled();
         let actual = main_sequence_distance(&metrics, &config);
         assert_eq!(actual.len(), 1);
@@ -512,7 +494,7 @@ mod tests {
 
     #[test]
     fn test_main_sequence_watch_distance_should_produce_warning() {
-        let metrics = make_metrics(&[("src/a.py", Some(0.5), Some(0.5), Some(0.25))]);
+        let metrics = make_metrics(&[("src/a.py", 0.5, 0.5, 0.25)]);
         let config = ms_enabled();
         let actual = main_sequence_distance(&metrics, &config);
         assert_eq!(actual.len(), 1);
@@ -521,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_main_sequence_healthy_distance_should_produce_no_violation() {
-        let metrics = make_metrics(&[("src/a.py", Some(0.5), Some(0.5), Some(0.1))]);
+        let metrics = make_metrics(&[("src/a.py", 0.5, 0.5, 0.1)]);
         let config = ms_enabled();
         let actual = main_sequence_distance(&metrics, &config);
         assert_eq!(actual.len(), 0);
@@ -529,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_main_sequence_test_node_should_be_skipped() {
-        let mut metrics = make_metrics(&[("tests/test_a.py", Some(0.5), Some(0.5), Some(0.6))]);
+        let mut metrics = make_metrics(&[("tests/test_a.py", 0.5, 0.5, 0.6)]);
         metrics.nodes[0].role = FileRole::Test;
         let config = ms_enabled();
         let actual = main_sequence_distance(&metrics, &config);
@@ -537,8 +519,8 @@ mod tests {
     }
 
     #[test]
-    fn test_main_sequence_none_distance_should_produce_no_violation() {
-        let metrics = make_metrics(&[("src/a.py", Some(0.5), None, None)]);
+    fn test_main_sequence_on_sequence_should_produce_no_violation() {
+        let metrics = make_metrics(&[("src/a.py", 0.5, 0.5, 0.0)]);
         let config = ms_enabled();
         let actual = main_sequence_distance(&metrics, &config);
         assert_eq!(actual.len(), 0);
@@ -546,7 +528,7 @@ mod tests {
 
     #[test]
     fn test_main_sequence_disabled_should_produce_no_violations() {
-        let metrics = make_metrics(&[("src/a.py", Some(0.5), Some(0.5), Some(0.6))]);
+        let metrics = make_metrics(&[("src/a.py", 0.5, 0.5, 0.6)]);
         let config = FitnessConfig {
             main_sequence: MainSequenceConfig {
                 enabled: false,

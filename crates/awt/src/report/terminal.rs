@@ -184,7 +184,6 @@ fn print_metrics_section(metrics: &MetricsResult) {
     ]);
 
     for node in source_nodes.iter().take(20) {
-        let fmt_opt = |v: Option<f64>| v.map_or("—".to_string(), |x| format!("{x:.2}"));
         let status_cell = match (node.distance_failure, node.distance_warning) {
             (true, _) => Cell::new("FAIL").fg(Color::Red),
             (_, true) => Cell::new("warn").fg(Color::Yellow),
@@ -194,9 +193,9 @@ fn print_metrics_section(metrics: &MetricsResult) {
             Cell::new(node.file.as_str()),
             Cell::new(node.fan_in.to_string()),
             Cell::new(node.fan_out.to_string()),
-            Cell::new(fmt_opt(node.instability)),
-            Cell::new(fmt_opt(node.abstractness)),
-            Cell::new(fmt_opt(node.distance)),
+            Cell::new(format!("{:.2}", node.instability)),
+            Cell::new(format!("{:.2}", node.abstractness)),
+            Cell::new(format!("{:.2}", node.distance)),
             status_cell,
         ]);
     }
@@ -207,10 +206,7 @@ fn print_metrics_section(metrics: &MetricsResult) {
         .filter(|n| n.distance_warning && !n.distance_failure)
         .count();
     let failures = source_nodes.iter().filter(|n| n.distance_failure).count();
-    let on_sequence = source_nodes
-        .iter()
-        .filter(|n| n.distance.is_some_and(|d| d <= 0.3))
-        .count();
+    let on_sequence = source_nodes.iter().filter(|n| n.distance <= 0.3).count();
     println!("  {on_sequence} on main sequence, {warnings} warnings, {failures} failures");
 }
 
