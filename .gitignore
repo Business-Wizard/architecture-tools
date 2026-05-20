@@ -1,5 +1,6 @@
 secrets.*
 typings/
+.vscode/settings.json
 
 
 # Rust Cargo
