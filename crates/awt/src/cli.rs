@@ -8,6 +8,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::config;
+use crate::config::MainSequenceConfig;
 use crate::discovery;
 use crate::failures::{basedpyright, pytest};
 use crate::fitness;
@@ -22,6 +23,7 @@ use crate::mutations::{
     add_parameter, move_module, remove_import, remove_module, remove_parameter, rename_parameter,
 };
 use crate::repo;
+use crate::report::chart;
 use crate::report::dot;
 use crate::report::summary::{self, RunReport};
 use crate::report::terminal;
@@ -72,6 +74,13 @@ pub struct RunArgs {
         help = "Write coupling graph to this .dot file"
     )]
     pub dot_out: Utf8PathBuf,
+
+    #[arg(
+        long,
+        default_value = "main_sequence.png",
+        help = "Write I-vs-A scatter chart to this PNG file"
+    )]
+    pub chart_out: Utf8PathBuf,
 
     #[arg(
         long,
@@ -191,7 +200,13 @@ fn run_command(args: &RunArgs) {
 
     let report = RunReport::build(&baseline, &results, &cluster_result);
 
-    write_outputs(args, &graph_idx, &report);
+    write_outputs(
+        args,
+        &graph_idx,
+        &report,
+        &metrics_result,
+        &cfg.fitness.main_sequence,
+    );
 
     if args.fail_on_violations && fitness_report.has_errors() {
         std::process::exit(2);
@@ -319,9 +334,19 @@ async fn run_mutant_async(
     }
 }
 
-fn write_outputs(args: &RunArgs, graph_idx: &GraphIndex, report: &RunReport) {
+fn write_outputs(
+    args: &RunArgs,
+    graph_idx: &GraphIndex,
+    report: &RunReport,
+    metrics: &crate::graph::metrics::MetricsResult,
+    main_sequence: &MainSequenceConfig,
+) {
     if let Err(e) = dot::write_dot(graph_idx, args.dot_out.as_path()) {
         eprintln!("error writing dot output: {e}");
+    }
+
+    if let Err(e) = chart::write_chart(metrics, main_sequence, args.chart_out.as_path()) {
+        eprintln!("error writing chart output: {e}");
     }
 
     if let Some(json_path) = &args.json_out {

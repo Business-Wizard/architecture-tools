@@ -24,6 +24,7 @@ comfy-table = "7"
 indicatif = "0.17"
 colored = "3"
 sha2 = "0.10"
+plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "line_series", "ttf"] }
 
 [lints]
 workspace = true
