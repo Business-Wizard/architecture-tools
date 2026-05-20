@@ -24,7 +24,7 @@ use crate::repo;
 use crate::report::dot;
 use crate::report::summary::{self, RunReport};
 use crate::report::terminal;
-use crate::runner::temp_repo::TempRepo;
+use crate::runner::temp_repo::{RepoRelPath, TempRepo};
 use crate::runner::verifier::VerifierSet;
 
 #[derive(Parser)]
@@ -361,18 +361,18 @@ fn prepare_temp(
         OperatorKind::RemoveModule | OperatorKind::MoveModule => None,
     };
 
+    let rel = RepoRelPath::try_from_candidate(&candidate.file).map_err(|e| e.to_string())?;
     let temp = TempRepo::copy_from(repo_root, include_dirs).map_err(|e| e.to_string())?;
 
     match candidate.operator {
         OperatorKind::RemoveModule => {
-            remove_module::apply(temp.path(), candidate.file.as_str())
-                .map_err(|e| e.to_string())?;
+            remove_module::apply(temp.path(), rel.as_str()).map_err(|e| e.to_string())?;
         }
         OperatorKind::MoveModule => {
-            move_module::apply(temp.path(), candidate.file.as_str()).map_err(|e| e.to_string())?;
+            move_module::apply(temp.path(), rel.as_str()).map_err(|e| e.to_string())?;
         }
         _ => {
-            temp.write_mutated_file(candidate.file.as_str(), &patch.unwrap_or_default())
+            temp.write_mutated_file(&rel, &patch.unwrap_or_default())
                 .map_err(|e| e.to_string())?;
         }
     }
