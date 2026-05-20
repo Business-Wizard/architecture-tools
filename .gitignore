@@ -1,6 +1,7 @@
 secrets.*
 typings/
 .vscode/settings.json
+mvp_base/
 
 
 # Rust Cargo
