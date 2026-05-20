@@ -57,6 +57,7 @@ pub struct ClusteringResult {
     pub unexpected: Vec<UnexpectedCoupling>,
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn analyse(idx: &GraphIndex, results: &[MutantResult]) -> ClusteringResult {
     // Per-file operator breakdown: file → operator → (distinct source files, distinct test files)
     type FileSets<'a> = (
@@ -240,7 +241,7 @@ mod tests {
         clustering
             .centers
             .iter()
-            .find(|c| c.file == Utf8PathBuf::from(file))
+            .find(|c| c.file.as_str() == file)
             .unwrap_or_else(|| panic!("{file} should be a center"))
     }
 
