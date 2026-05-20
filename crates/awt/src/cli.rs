@@ -178,7 +178,7 @@ fn run_command(args: &RunArgs) {
         .collect();
     let abstractness_map = abstractness::compute(&repo_root, &include_dirs);
     let metrics_result = metrics::compute(&graph_idx, &abstractness_map);
-    let cluster_result = graph_analysis::analyse(&graph_idx);
+    let cluster_result = graph_analysis::analyse(&graph_idx, &results);
     terminal::print_report(&baseline, &results, &cluster_result, &metrics_result);
 
     let report = RunReport::build(&baseline, &results, &cluster_result);

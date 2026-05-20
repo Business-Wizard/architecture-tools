@@ -1,4 +1,4 @@
-use comfy_table::{Cell, Color, Table};
+use comfy_table::{Cell, Color, Table, presets};
 
 use crate::graph::coupling_graph::FileRole;
 use crate::graph::graph_analysis::{ClusteringResult, RefactorHint, refactor_hints};
@@ -61,21 +61,54 @@ fn print_summary_section(results: &[MutantResult]) {
 }
 
 fn print_centers_section(clustering: &ClusteringResult) {
+    use crate::model::OperatorKind;
+    use std::collections::BTreeSet;
+
     if clustering.centers.is_empty() {
         return;
     }
 
-    println!("\n─── Top Centers of Gravity ──────────────────────────────");
-    let mut table = Table::new();
-    table.load_preset(comfy_table::presets::UTF8_FULL);
-    table.set_header(vec!["File", "Source code affected", "Test code affected"]);
+    let centers = clustering.centers.iter().take(10).collect::<Vec<_>>();
 
-    for center in clustering.centers.iter().take(10) {
-        table.add_row(vec![
-            Cell::new(center.file.as_str()),
-            Cell::new(center.affected_source_code.to_string()),
-            Cell::new(center.affected_test_code.to_string()),
-        ]);
+    // Collect operators that appear in any center, in a stable order
+    let active_ops: Vec<OperatorKind> = {
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        let mut ops = vec![];
+        for c in &centers {
+            let mut sorted: Vec<_> = c.operator_breakdown.keys().collect();
+            sorted.sort_by_key(|op| op.short_name());
+            for op in sorted {
+                if seen.insert(op.to_string()) {
+                    ops.push(op.clone());
+                }
+            }
+        }
+        ops
+    };
+
+    println!("\n─── Coupling Hotspots ───────────────────────────────────");
+    let mut table = Table::new();
+    table.load_preset(presets::UTF8_FULL);
+
+    // Header row: File + one column per operator
+    let mut header = vec![Cell::new("File")];
+    for op in &active_ops {
+        header.push(Cell::new(format!("{}\nsrc / test", op.short_name())));
+    }
+    table.set_header(header);
+
+    for center in &centers {
+        let mut row = vec![Cell::new(center.file.as_str())];
+        for op in &active_ops {
+            let cell = match center.operator_breakdown.get(op) {
+                Some(b) if b.source > 0 || b.test > 0 => {
+                    Cell::new(format!("{} / {}", b.source, b.test))
+                }
+                _ => Cell::new("—"),
+            };
+            row.push(cell);
+        }
+        table.add_row(row);
     }
 
     println!("{table}");

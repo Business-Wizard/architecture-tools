@@ -1,7 +1,16 @@
+use std::collections::HashMap;
+
 use camino::Utf8PathBuf;
 use petgraph::visit::EdgeRef;
 
 use crate::graph::coupling_graph::{FileRole, GraphIndex};
+use crate::model::{MutantResult, MutantStatus, OperatorKind};
+
+#[derive(Debug, Default, PartialEq)]
+pub struct OperatorBreakdown {
+    pub source: usize,
+    pub test: usize,
+}
 
 #[derive(Debug)]
 pub struct CenterOfGravity {
@@ -11,6 +20,7 @@ pub struct CenterOfGravity {
     pub edge_count: usize,
     pub total_failure_count: usize,
     pub heaviest_neighbor: Option<Utf8PathBuf>,
+    pub operator_breakdown: HashMap<OperatorKind, OperatorBreakdown>,
 }
 
 impl CenterOfGravity {
@@ -47,7 +57,29 @@ pub struct ClusteringResult {
     pub unexpected: Vec<UnexpectedCoupling>,
 }
 
-pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
+pub fn analyse(idx: &GraphIndex, results: &[MutantResult]) -> ClusteringResult {
+    // Per-file operator breakdown: file → operator → (distinct source files, distinct test files)
+    type FileSets<'a> = (
+        std::collections::HashSet<&'a Utf8PathBuf>,
+        std::collections::HashSet<&'a Utf8PathBuf>,
+    );
+    let mut operator_breakdown: HashMap<&Utf8PathBuf, HashMap<&OperatorKind, FileSets<'_>>> =
+        HashMap::new();
+    for r in results {
+        if r.status != MutantStatus::Breaks || r.external_failures.is_empty() {
+            continue;
+        }
+        let entry = operator_breakdown.entry(&r.candidate.file).or_default();
+        let (src_set, test_set) = entry.entry(&r.candidate.operator).or_default();
+        for f in r.affected_files() {
+            if FileRole::from_path(f) == FileRole::Test {
+                test_set.insert(f);
+            } else {
+                src_set.insert(f);
+            }
+        }
+    }
+
     // Centers of gravity: nodes with highest out-degree (by distinct affected files)
     let mut centers: Vec<CenterOfGravity> = idx
         .graph
@@ -78,6 +110,22 @@ pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
                     heaviest_neighbor = Some((failures, target.path.clone()));
                 }
             }
+            let breakdown = operator_breakdown
+                .get(&node.path)
+                .map(|m| {
+                    m.iter()
+                        .map(|(&op, (src, tst))| {
+                            (
+                                op.clone(),
+                                OperatorBreakdown {
+                                    source: src.len(),
+                                    test: tst.len(),
+                                },
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             Some(CenterOfGravity {
                 file: node.path.clone(),
                 affected_source_code: source_code,
@@ -85,6 +133,7 @@ pub fn analyse(idx: &GraphIndex) -> ClusteringResult {
                 edge_count: edges.len(),
                 total_failure_count,
                 heaviest_neighbor: heaviest_neighbor.map(|(_, p)| p),
+                operator_breakdown: breakdown,
             })
         })
         .collect();
@@ -173,20 +222,26 @@ mod tests {
             std::collections::HashMap::new();
         for (src, dst) in edges {
             let s = *map.entry(src).or_insert_with(|| {
-                graph.add_node(CouplingNode {
-                    path: Utf8PathBuf::from(*src),
-                    role: FileRole::Source,
-                })
+                let path = Utf8PathBuf::from(*src);
+                let role = FileRole::from_path(&path);
+                graph.add_node(CouplingNode { path, role })
             });
             let d = *map.entry(dst).or_insert_with(|| {
-                graph.add_node(CouplingNode {
-                    path: Utf8PathBuf::from(*dst),
-                    role: FileRole::Source,
-                })
+                let path = Utf8PathBuf::from(*dst);
+                let role = FileRole::from_path(&path);
+                graph.add_node(CouplingNode { path, role })
             });
             graph.add_edge(s, d, CouplingEdge { failure_count: 3 });
         }
         GraphIndex { graph }
+    }
+
+    fn find_center<'a>(clustering: &'a ClusteringResult, file: &str) -> &'a CenterOfGravity {
+        clustering
+            .centers
+            .iter()
+            .find(|c| c.file == Utf8PathBuf::from(file))
+            .unwrap_or_else(|| panic!("{file} should be a center"))
     }
 
     #[test]
@@ -222,6 +277,7 @@ mod tests {
             edge_count,
             total_failure_count: total_failures,
             heaviest_neighbor: heaviest.map(Utf8PathBuf::from),
+            operator_breakdown: HashMap::new(),
         }
     }
 
@@ -326,17 +382,155 @@ mod tests {
         );
     }
 
+    fn make_mutant_result(
+        mutant_file: &str,
+        operator: OperatorKind,
+        status: MutantStatus,
+        affected_files: &[&str],
+    ) -> MutantResult {
+        use crate::model::{
+            Candidate, CandidateKind, FailureCategory, FailureEvent, FailureScope, MutantId,
+            VerifierKind,
+        };
+        let external_failures = affected_files
+            .iter()
+            .map(|f| FailureEvent {
+                mutant_id: MutantId::new(mutant_file, "fn", "op"),
+                command: VerifierKind::Pytest,
+                file: Utf8PathBuf::from(*f),
+                line: None,
+                column: None,
+                symbol: None,
+                category: FailureCategory::TestAssertion,
+                message: String::new(),
+                scope: FailureScope::External,
+            })
+            .collect();
+        MutantResult {
+            candidate: Candidate {
+                id: MutantId::new(mutant_file, "fn", "op"),
+                file: Utf8PathBuf::from(mutant_file),
+                symbol: "fn".into(),
+                kind: CandidateKind::Function,
+                operator,
+                line: 1,
+                byte_start: 0,
+                byte_end: 0,
+            },
+            status,
+            local_failures: vec![],
+            external_failures,
+        }
+    }
+
+    #[test]
+    fn test_analyse_operator_breakdown_should_split_source_and_test_files() {
+        let idx = make_graph_index(&[
+            ("src/order.py", "src/billing.py"),
+            ("src/order.py", "tests/test_order.py"),
+        ]);
+        let results = vec![make_mutant_result(
+            "src/order.py",
+            OperatorKind::AddRequiredParameter,
+            MutantStatus::Breaks,
+            &["src/billing.py", "tests/test_order.py"],
+        )];
+        let clustering = analyse(&idx, &results);
+        let center = find_center(&clustering, "src/order.py");
+        assert_eq!(
+            center
+                .operator_breakdown
+                .get(&OperatorKind::AddRequiredParameter),
+            Some(&OperatorBreakdown { source: 1, test: 1 })
+        );
+    }
+
+    #[test]
+    fn test_analyse_operator_breakdown_should_track_multiple_operators_separately() {
+        let idx = make_graph_index(&[
+            ("src/order.py", "src/billing.py"),
+            ("src/order.py", "tests/test_order.py"),
+        ]);
+        let results = vec![
+            make_mutant_result(
+                "src/order.py",
+                OperatorKind::AddRequiredParameter,
+                MutantStatus::Breaks,
+                &["src/billing.py"],
+            ),
+            make_mutant_result(
+                "src/order.py",
+                OperatorKind::RemoveImport,
+                MutantStatus::Breaks,
+                &["tests/test_order.py"],
+            ),
+        ];
+        let clustering = analyse(&idx, &results);
+        let center = find_center(&clustering, "src/order.py");
+        assert_eq!(
+            center
+                .operator_breakdown
+                .get(&OperatorKind::AddRequiredParameter),
+            Some(&OperatorBreakdown { source: 1, test: 0 })
+        );
+        assert_eq!(
+            center.operator_breakdown.get(&OperatorKind::RemoveImport),
+            Some(&OperatorBreakdown { source: 0, test: 1 })
+        );
+    }
+
+    #[test]
+    fn test_analyse_operator_breakdown_should_exclude_surviving_mutants() {
+        let idx = make_graph_index(&[("src/order.py", "src/billing.py")]);
+        let results = vec![make_mutant_result(
+            "src/order.py",
+            OperatorKind::AddRequiredParameter,
+            MutantStatus::Survives,
+            &["src/billing.py"],
+        )];
+        let clustering = analyse(&idx, &results);
+        let center = find_center(&clustering, "src/order.py");
+        assert!(center.operator_breakdown.is_empty());
+    }
+
+    #[test]
+    fn test_analyse_operator_breakdown_should_deduplicate_files_across_mutations() {
+        let idx = make_graph_index(&[("src/order.py", "src/billing.py")]);
+        let results = vec![
+            make_mutant_result(
+                "src/order.py",
+                OperatorKind::AddRequiredParameter,
+                MutantStatus::Breaks,
+                &["src/billing.py"],
+            ),
+            make_mutant_result(
+                "src/order.py",
+                OperatorKind::AddRequiredParameter,
+                MutantStatus::Breaks,
+                &["src/billing.py"],
+            ),
+        ];
+        let clustering = analyse(&idx, &results);
+        let center = find_center(&clustering, "src/order.py");
+        assert_eq!(
+            center
+                .operator_breakdown
+                .get(&OperatorKind::AddRequiredParameter),
+            Some(&OperatorBreakdown { source: 1, test: 0 })
+        );
+    }
+
     #[test]
     fn test_analyse_should_flag_different_package_edge_as_unexpected() {
         let idx = make_graph_index(&[("src/a/order.py", "lib/b/report.py")]);
-        let result = analyse(&idx);
+        let result = analyse(&idx, &[]);
         assert_eq!(result.unexpected.len(), 1);
     }
 
     #[test]
     fn test_analyse_should_not_flag_same_package_edge_as_unexpected() {
         let idx = make_graph_index(&[("src/a/order.py", "src/b/invoice.py")]);
-        let result = analyse(&idx);
+        let result = analyse(&idx, &[]);
         assert!(result.unexpected.is_empty());
     }
 }

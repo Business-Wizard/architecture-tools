@@ -30,7 +30,7 @@ pub enum CandidateKind {
     Module,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OperatorKind {
     AddRequiredParameter,
     RenameParameter,
@@ -51,6 +51,19 @@ impl std::fmt::Display for OperatorKind {
             Self::MoveModule => "move_module",
         };
         f.write_str(s)
+    }
+}
+
+impl OperatorKind {
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            Self::AddRequiredParameter => "+param",
+            Self::RenameParameter => "~param",
+            Self::RemoveParameter => "-param",
+            Self::RemoveImport => "-import",
+            Self::RemoveModule => "-module",
+            Self::MoveModule => "mv",
+        }
     }
 }
 
