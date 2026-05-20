@@ -53,10 +53,7 @@ pub struct RunArgs {
     #[arg(long, help = "Maximum number of mutants to run")]
     pub max_mutants: Option<usize>,
 
-    #[arg(
-        long,
-        help = "Max concurrent mutation jobs (default: half CPUs, min 2, max 8)"
-    )]
+    #[arg(long, help = "Max concurrent mutation jobs (default: CPU count - 1)")]
     pub jobs: Option<usize>,
 
     #[arg(long, help = "Keep temp directory when a mutation run fails")]

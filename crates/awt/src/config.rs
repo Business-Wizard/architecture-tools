@@ -56,7 +56,7 @@ impl Default for OperatorConfig {
 
 fn default_jobs() -> usize {
     let cpus = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
-    (cpus / 2).clamp(2, 8)
+    cpus.saturating_sub(1).max(1)
 }
 
 pub fn load(config_path: Option<&Utf8PathBuf>, repo_root: &Path) -> Result<Config, ConfigError> {
