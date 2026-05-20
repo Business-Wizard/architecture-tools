@@ -164,6 +164,7 @@ fn run_command(args: &RunArgs) {
         cfg.timeout_secs,
         cfg.keep_temp_on_failure,
         cfg.jobs,
+        cfg.include_dirs.clone(),
         Arc::clone(&pb),
     ));
 
@@ -206,9 +207,11 @@ async fn run_mutants_async(
     timeout_secs: u64,
     keep_on_fail: bool,
     jobs: usize,
+    include_dirs: Vec<String>,
     pb: Arc<ProgressBar>,
 ) -> Vec<MutantResult> {
     let sem = Arc::new(Semaphore::new(jobs));
+    let include_dirs = Arc::new(include_dirs);
     let mut join_set: JoinSet<MutantResult> = JoinSet::new();
 
     for candidate in candidates {
@@ -218,10 +221,12 @@ async fn run_mutants_async(
             .expect("semaphore closed");
         let repo = repo_root.to_path_buf();
         let pb = Arc::clone(&pb);
+        let dirs = Arc::clone(&include_dirs);
 
         join_set.spawn(async move {
             let _permit = permit; // released when this task completes
-            let result = run_mutant_async(candidate, &repo, timeout_secs, keep_on_fail).await;
+            let result =
+                run_mutant_async(candidate, &repo, timeout_secs, keep_on_fail, &dirs).await;
             pb.inc(1);
             result
         });
@@ -242,17 +247,20 @@ async fn run_mutant_async(
     repo_root: &std::path::Path,
     timeout_secs: u64,
     keep_on_fail: bool,
+    include_dirs: &[String],
 ) -> MutantResult {
     let candidate_clone = candidate.clone();
     let repo = repo_root.to_path_buf();
+    let dirs = include_dirs.to_vec();
 
-    let temp = match tokio::task::spawn_blocking(move || prepare_temp(&repo, &candidate_clone))
-        .await
-        .expect("prepare_temp task panicked")
-    {
-        Ok(t) => t,
-        Err(msg) => return invalid(&candidate, &msg),
-    };
+    let temp =
+        match tokio::task::spawn_blocking(move || prepare_temp(&repo, &candidate_clone, &dirs))
+            .await
+            .expect("prepare_temp task panicked")
+        {
+            Ok(t) => t,
+            Err(msg) => return invalid(&candidate, &msg),
+        };
 
     let timeout = std::time::Duration::from_secs(timeout_secs);
     let temp_path = temp.path().to_path_buf();
@@ -329,7 +337,11 @@ fn write_outputs(args: &RunArgs, graph_idx: &GraphIndex, report: &RunReport) {
     }
 }
 
-fn prepare_temp(repo_root: &std::path::Path, candidate: &Candidate) -> Result<TempRepo, String> {
+fn prepare_temp(
+    repo_root: &std::path::Path,
+    candidate: &Candidate,
+    include_dirs: &[String],
+) -> Result<TempRepo, String> {
     let source =
         std::fs::read(repo_root.join(candidate.file.as_str())).map_err(|e| e.to_string())?;
 
@@ -349,7 +361,7 @@ fn prepare_temp(repo_root: &std::path::Path, candidate: &Candidate) -> Result<Te
         OperatorKind::RemoveModule | OperatorKind::MoveModule => None,
     };
 
-    let temp = TempRepo::copy_from(repo_root).map_err(|e| e.to_string())?;
+    let temp = TempRepo::copy_from(repo_root, include_dirs).map_err(|e| e.to_string())?;
 
     match candidate.operator {
         OperatorKind::RemoveModule => {
