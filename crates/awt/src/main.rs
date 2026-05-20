@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod discovery;
 mod failures;
+mod fitness;
 mod graph;
 mod model;
 mod mutations;

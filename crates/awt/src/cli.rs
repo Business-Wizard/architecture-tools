@@ -10,6 +10,7 @@ use tokio::task::JoinSet;
 use crate::config;
 use crate::discovery;
 use crate::failures::{basedpyright, pytest};
+use crate::fitness;
 use crate::graph::coupling_graph::GraphIndex;
 use crate::graph::{abstractness, graph_analysis, metrics};
 use crate::model::OperatorKind;
@@ -77,6 +78,9 @@ pub struct RunArgs {
         help = "Discover candidates and print counts without running mutations"
     )]
     pub dry_run: bool,
+
+    #[arg(long, help = "Exit non-zero if any fitness violations are found")]
+    pub fail_on_violations: bool,
 }
 
 pub fn run() {
@@ -176,11 +180,22 @@ fn run_command(args: &RunArgs) {
     let abstractness_map = abstractness::compute(&repo_root, &include_dirs);
     let metrics_result = metrics::compute(&graph_idx, &abstractness_map);
     let cluster_result = graph_analysis::analyse(&graph_idx, &results);
-    terminal::print_report(&baseline, &results, &cluster_result, &metrics_result);
+    let fitness_report = fitness::evaluate_all(&graph_idx, &metrics_result, &cfg.fitness);
+    terminal::print_report(
+        &baseline,
+        &results,
+        &cluster_result,
+        &metrics_result,
+        &fitness_report,
+    );
 
     let report = RunReport::build(&baseline, &results, &cluster_result);
 
     write_outputs(args, &graph_idx, &report);
+
+    if args.fail_on_violations && fitness_report.has_errors() {
+        std::process::exit(2);
+    }
 }
 
 async fn run_baseline_async(verifiers: &VerifierSet, repo: &std::path::Path) -> BaselineResult {

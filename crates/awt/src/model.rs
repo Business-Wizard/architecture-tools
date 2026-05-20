@@ -222,6 +222,86 @@ pub enum RunnerError {
     TempDir(String),
 }
 
+// ── Fitness functions ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RuleId {
+    AdpNoCycles,
+    SdpStableDependencies,
+    MainSequenceDistance,
+    DependencyRule,
+}
+
+impl std::fmt::Display for RuleId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::AdpNoCycles => "ADP_NO_CYCLES",
+            Self::SdpStableDependencies => "SDP_STABLE_DEPENDENCIES",
+            Self::MainSequenceDistance => "MAIN_SEQUENCE_DISTANCE",
+            Self::DependencyRule => "DEPENDENCY_RULE",
+        };
+        f.write_str(s)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Severity {
+    Warning,
+    Error,
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Warning => f.write_str("warning"),
+            Self::Error => f.write_str("error"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DistanceBand {
+    Watch,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ViolationDetail {
+    Cycle {
+        path: Vec<Utf8PathBuf>,
+    },
+    UnstableDependency {
+        source: Utf8PathBuf,
+        target: Utf8PathBuf,
+        instability_source: f64,
+        instability_target: f64,
+        delta: f64,
+    },
+    DistanceViolation {
+        file: Utf8PathBuf,
+        abstractness: Option<f64>,
+        instability: Option<f64>,
+        distance: f64,
+        band: DistanceBand,
+    },
+    ForbiddenDependency {
+        source: Utf8PathBuf,
+        source_layer: String,
+        target: Utf8PathBuf,
+        target_layer: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Violation {
+    pub rule: RuleId,
+    pub severity: Severity,
+    pub message: String,
+    pub files: Vec<Utf8PathBuf>,
+    pub detail: ViolationDetail,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +382,20 @@ mod tests {
         };
         let actual = result.affected_files();
         assert_eq!(actual.len(), 1);
+    }
+
+    #[test]
+    fn test_rule_id_display_should_show_screaming_snake_case() {
+        assert_eq!(RuleId::AdpNoCycles.to_string(), "ADP_NO_CYCLES");
+    }
+
+    #[test]
+    fn test_severity_display_should_show_lowercase() {
+        assert_eq!(Severity::Error.to_string(), "error");
+    }
+
+    #[test]
+    fn test_severity_ord_should_order_error_above_warning() {
+        assert!(Severity::Error > Severity::Warning);
     }
 }

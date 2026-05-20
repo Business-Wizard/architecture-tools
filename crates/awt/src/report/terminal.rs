@@ -1,15 +1,17 @@
 use comfy_table::{Cell, Color, Table, presets};
 
+use crate::fitness::FitnessReport;
 use crate::graph::coupling_graph::FileRole;
 use crate::graph::graph_analysis::{ClusteringResult, RefactorHint, refactor_hints};
 use crate::graph::metrics::{MetricsResult, NodeMetrics};
-use crate::model::{BaselineResult, MutantResult, MutantStatus, VerifierStatus};
+use crate::model::{BaselineResult, MutantResult, MutantStatus, Severity, VerifierStatus};
 
 pub fn print_report(
     baseline: &BaselineResult,
     results: &[MutantResult],
     clustering: &ClusteringResult,
     metrics: &MetricsResult,
+    fitness_report: &FitnessReport,
 ) {
     print_baseline_section(baseline);
     print_summary_section(results);
@@ -17,6 +19,7 @@ pub fn print_report(
     print_unexpected_section(clustering);
     print_refactor_section(clustering);
     print_metrics_section(metrics);
+    print_violations_section(fitness_report);
 }
 
 fn print_baseline_section(b: &BaselineResult) {
@@ -209,4 +212,42 @@ fn print_metrics_section(metrics: &MetricsResult) {
         .filter(|n| n.distance.is_some_and(|d| d <= 0.3))
         .count();
     println!("  {on_sequence} on main sequence, {warnings} warnings, {failures} failures");
+}
+
+fn print_violations_section(report: &FitnessReport) {
+    if report.violations.is_empty() {
+        return;
+    }
+
+    let errors = report
+        .violations
+        .iter()
+        .filter(|v| v.severity == Severity::Error)
+        .count();
+    let warnings = report
+        .violations
+        .iter()
+        .filter(|v| v.severity == Severity::Warning)
+        .count();
+
+    println!("\n─── Fitness Violations ──────────────────────────────────");
+    println!("  {errors} error(s)  {warnings} warning(s)");
+
+    let mut table = Table::new();
+    table.load_preset(comfy_table::presets::UTF8_FULL);
+    table.set_header(vec!["Severity", "Rule", "Message"]);
+
+    for v in &report.violations {
+        let sev_cell = match v.severity {
+            Severity::Error => Cell::new("error").fg(Color::Red),
+            Severity::Warning => Cell::new("warn").fg(Color::Yellow),
+        };
+        table.add_row(vec![
+            sev_cell,
+            Cell::new(v.rule.to_string()),
+            Cell::new(&v.message),
+        ]);
+    }
+
+    println!("{table}");
 }

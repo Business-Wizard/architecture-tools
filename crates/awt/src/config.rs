@@ -14,6 +14,7 @@ pub struct Config {
     pub keep_temp_on_failure: bool,
     pub include_dirs: Vec<String>,
     pub operators: OperatorConfig,
+    pub fitness: FitnessConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +38,7 @@ impl Default for Config {
             keep_temp_on_failure: false,
             include_dirs: vec!["src".into()],
             operators: OperatorConfig::default(),
+            fitness: FitnessConfig::default(),
         }
     }
 }
@@ -50,6 +52,66 @@ impl Default for OperatorConfig {
             remove_import: false,
             remove_module: false,
             move_module: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FitnessConfig {
+    pub adp: AdpConfig,
+    pub sdp: SdpConfig,
+    pub main_sequence: MainSequenceConfig,
+    pub layers: Vec<LayerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AdpConfig {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SdpConfig {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MainSequenceConfig {
+    pub enabled: bool,
+    pub watch_threshold: f64,
+    pub warning_threshold: f64,
+    pub error_threshold: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerConfig {
+    pub name: String,
+    pub paths: Vec<String>,
+    pub may_depend_on: Vec<String>,
+}
+
+impl Default for AdpConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for SdpConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for MainSequenceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            watch_threshold: 0.2,
+            warning_threshold: 0.3,
+            error_threshold: 0.5,
         }
     }
 }
@@ -72,4 +134,28 @@ pub fn load(config_path: Option<&Utf8PathBuf>, repo_root: &Path) -> Result<Confi
     let raw = std::fs::read_to_string(&candidate)?;
     let config: Config = toml::from_str(&raw)?;
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fitness_config_default_should_have_all_rules_enabled() {
+        let cfg = FitnessConfig::default();
+        assert!(cfg.adp.enabled && cfg.sdp.enabled && cfg.main_sequence.enabled);
+    }
+
+    #[test]
+    fn test_fitness_config_from_toml_should_parse_layers() {
+        let toml = r#"
+[[fitness.layers]]
+name = "domain"
+paths = ["src/domain/**"]
+may_depend_on = []
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.fitness.layers.len(), 1);
+        assert_eq!(cfg.fitness.layers[0].name, "domain");
+    }
 }
