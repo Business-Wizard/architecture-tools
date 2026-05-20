@@ -144,6 +144,10 @@ dmypy.json
 # Mac OS files
 *.DS_Store
 
+# Nix build symlinks (result, result-2, result-N)
+result
+result-*
+
 # awt output files
 coupling.dot
 

@@ -21,8 +21,10 @@
         rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
         beads = pkgs.callPackage ./nix/beads.nix {};
         loctree = pkgs.callPackage ./nix/loctree.nix {};
+        ai-coach = pkgs.callPackage ./nix/ai-coach.nix {};
       in
       {
+        packages.ai-coach = ai-coach;
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             jujutsu
