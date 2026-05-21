@@ -30,6 +30,16 @@ const COLOUR_NEUTRAL: RGBColor = RGBColor(130, 130, 130);
 const COLOUR_STEEP: RGBColor = RGBColor(220, 160, 0);
 const STEEP_JUMP_THRESHOLD: f64 = 0.8;
 
+#[derive(Debug, Clone, Copy, Default)]
+pub enum EdgeOrder {
+    /// Group by dependency module (most stable first), within group shortest jump first.
+    #[default]
+    ByDependencyThenJump,
+    /// Violations first, then steep jumps, then healthy, alphabetically within tier.
+    #[allow(dead_code)]
+    BySeverity,
+}
+
 /// Encapsulates axis orientation: stable (I=0) left, unstable (I=1) right.
 /// Arrows flow left→right, from depender toward dependency (stable on left).
 struct StabilityAxis;
@@ -77,6 +87,10 @@ impl SdpEdge {
         !self.is_violation() && delta >= STEEP_JUMP_THRESHOLD
     }
 
+    fn jump_magnitude(&self) -> f64 {
+        (self.depender.0.as_f64() - self.dependency.0.as_f64()).abs()
+    }
+
     fn colour(&self) -> RGBColor {
         let i_dep = self.dependency.0.as_f64();
         let i_per = self.depender.0.as_f64();
@@ -92,7 +106,31 @@ impl SdpEdge {
     }
 }
 
-fn collect_edges(idx: &GraphIndex, metrics: &MetricsResult) -> Vec<SdpEdge> {
+fn sort_edges(edges: &mut [SdpEdge], order: EdgeOrder) {
+    match order {
+        EdgeOrder::ByDependencyThenJump => edges.sort_by(|a, b| {
+            a.dependency
+                .0
+                .as_f64()
+                .partial_cmp(&b.dependency.0.as_f64())
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(
+                    a.jump_magnitude()
+                        .partial_cmp(&b.jump_magnitude())
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
+                .then(a.depender_label.cmp(&b.depender_label))
+        }),
+        EdgeOrder::BySeverity => edges.sort_by(|a, b| {
+            b.is_violation()
+                .cmp(&a.is_violation())
+                .then(b.is_steep().cmp(&a.is_steep()))
+                .then(a.depender_label.cmp(&b.depender_label))
+        }),
+    }
+}
+
+fn collect_edges(idx: &GraphIndex, metrics: &MetricsResult, order: EdgeOrder) -> Vec<SdpEdge> {
     let instability_map: HashMap<_, Instability> = metrics
         .nodes
         .iter()
@@ -131,13 +169,7 @@ fn collect_edges(idx: &GraphIndex, metrics: &MetricsResult) -> Vec<SdpEdge> {
         })
         .collect();
 
-    // Violations first, then steep jumps, then healthy, then neutral
-    edges.sort_by(|a, b| {
-        b.is_violation()
-            .cmp(&a.is_violation())
-            .then(b.is_steep().cmp(&a.is_steep()))
-            .then(a.depender_label.cmp(&b.depender_label))
-    });
+    sort_edges(&mut edges, order);
     edges
 }
 
@@ -293,7 +325,7 @@ pub fn write_sdp_flow(
     metrics: &MetricsResult,
     path: &Utf8Path,
 ) -> io::Result<()> {
-    let edges = collect_edges(idx, metrics);
+    let edges = collect_edges(idx, metrics, EdgeOrder::default());
     render_sdp_flow(&edges, path)
 }
 
@@ -408,7 +440,7 @@ mod tests {
     fn test_collect_edges_should_return_one_edge_for_single_dependency() {
         let idx = source_source_graph("src/a.py", "src/b.py");
         let m = stub_metrics(&idx);
-        let edges = collect_edges(&idx, &m);
+        let edges = collect_edges(&idx, &m, EdgeOrder::default());
         assert_eq!(edges.len(), 1);
     }
 
@@ -416,7 +448,7 @@ mod tests {
     fn test_collect_edges_should_exclude_test_nodes() {
         let idx = source_test_graph();
         let m = stub_metrics(&idx);
-        let edges = collect_edges(&idx, &m);
+        let edges = collect_edges(&idx, &m, EdgeOrder::default());
         assert_eq!(edges.len(), 0);
     }
 
@@ -424,7 +456,7 @@ mod tests {
     fn test_collect_edges_should_exclude_edges_with_missing_metrics() {
         let idx = source_source_graph("src/a.py", "src/b.py");
         let empty = MetricsResult { nodes: vec![] };
-        let edges = collect_edges(&idx, &empty);
+        let edges = collect_edges(&idx, &empty, EdgeOrder::default());
         assert_eq!(edges.len(), 0);
     }
 
@@ -434,7 +466,7 @@ mod tests {
         // In SDP terms: a depends on b → depender=a (I=1.0), dependency=b (I=0.0).
         let idx = source_source_graph("src/b.py", "src/a.py");
         let m = stub_metrics(&idx);
-        let edges = collect_edges(&idx, &m);
+        let edges = collect_edges(&idx, &m, EdgeOrder::default());
         assert_eq!(edges.len(), 1);
         assert!((0.0..=1.0).contains(&edges[0].depender.0.as_f64()));
         assert!((0.0..=1.0).contains(&edges[0].dependency.0.as_f64()));
@@ -468,5 +500,55 @@ mod tests {
         let (idx, m) = make_large_graph(MAX_ROWS + 5);
         let result = write_sdp_flow(&idx, &m, path.as_path());
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_sort_edges_by_dependency_then_jump_should_group_by_dependency_instability() {
+        // Two edges share dependency I=0.0; one has dependency I=0.5.
+        // Expect: the I=0.0 pair appears before the I=0.5 edge.
+        let mut edges = vec![
+            SdpEdge::from_coupling_edge(
+                Dependency(Instability::new(0.5)),
+                Depender(Instability::new(0.9)),
+                "late".into(),
+                "mid".into(),
+            ),
+            SdpEdge::from_coupling_edge(
+                Dependency(Instability::new(0.0)),
+                Depender(Instability::new(0.8)),
+                "b".into(),
+                "stable".into(),
+            ),
+            SdpEdge::from_coupling_edge(
+                Dependency(Instability::new(0.0)),
+                Depender(Instability::new(0.5)),
+                "a".into(),
+                "stable".into(),
+            ),
+        ];
+        sort_edges(&mut edges, EdgeOrder::ByDependencyThenJump);
+        let dep_instabilities: Vec<f64> = edges.iter().map(|e| e.dependency.0.as_f64()).collect();
+        assert_eq!(dep_instabilities, vec![0.0, 0.0, 0.5]);
+    }
+
+    #[test]
+    fn test_sort_edges_by_severity_should_put_violations_first() {
+        // One violation (depender.I < dependency.I), one healthy edge.
+        let mut edges = vec![
+            SdpEdge::from_coupling_edge(
+                Dependency(Instability::new(0.3)),
+                Depender(Instability::new(0.7)),
+                "healthy_depender".into(),
+                "healthy_dep".into(),
+            ),
+            SdpEdge::from_coupling_edge(
+                Dependency(Instability::new(0.8)),
+                Depender(Instability::new(0.2)),
+                "violation_depender".into(),
+                "violation_dep".into(),
+            ),
+        ];
+        sort_edges(&mut edges, EdgeOrder::BySeverity);
+        assert!(edges[0].is_violation());
     }
 }

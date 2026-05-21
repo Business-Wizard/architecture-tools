@@ -91,32 +91,58 @@ fn common_prefix_len(a: &str, b: &str) -> usize {
     a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count()
 }
 
+fn get_or_insert_node(
+    g: &mut CouplingGraph,
+    map: &mut HashMap<Utf8PathBuf, NodeIndex>,
+    path: Utf8PathBuf,
+) -> NodeIndex {
+    if let Some(&idx) = map.get(&path) {
+        return idx;
+    }
+    let role = FileRole::from_path(&path);
+    let idx = g.add_node(CouplingNode {
+        path: path.clone(),
+        role,
+    });
+    map.insert(path, idx);
+    idx
+}
+
+fn build_module_map(source_files: &[Utf8PathBuf]) -> HashMap<String, Utf8PathBuf> {
+    let mut map = HashMap::new();
+    for file in source_files {
+        let s = file.as_str();
+        let without_ext = s.strip_suffix(".py").unwrap_or(s);
+        let is_init = without_ext.ends_with("/__init__") || without_ext == "__init__";
+        let dotted = if is_init {
+            without_ext
+                .strip_suffix("/__init__")
+                .unwrap_or(without_ext)
+                .replace('/', ".")
+        } else {
+            without_ext.replace('/', ".")
+        };
+        let parts: Vec<&str> = dotted.split('.').collect();
+        for start in 0..parts.len() {
+            let suffix = parts[start..].join(".");
+            map.entry(suffix).or_insert_with(|| file.clone());
+        }
+    }
+    map
+}
+
 impl GraphIndex {
     pub fn build(results: &[MutantResult], known_source_files: &[Utf8PathBuf]) -> Self {
         let mut graph = CouplingGraph::new();
         let mut node_map: HashMap<Utf8PathBuf, NodeIndex> = HashMap::new();
-
-        let get_or_insert = |g: &mut CouplingGraph,
-                             map: &mut HashMap<Utf8PathBuf, NodeIndex>,
-                             path: Utf8PathBuf| {
-            if let Some(&idx) = map.get(&path) {
-                return idx;
-            }
-            let role = FileRole::from_path(&path);
-            let idx = g.add_node(CouplingNode {
-                path: path.clone(),
-                role,
-            });
-            map.insert(path, idx);
-            idx
-        };
 
         for result in results {
             if result.external_failures.is_empty() {
                 continue;
             }
 
-            let src_idx = get_or_insert(&mut graph, &mut node_map, result.candidate.file.clone());
+            let src_idx =
+                get_or_insert_node(&mut graph, &mut node_map, result.candidate.file.clone());
 
             let mut affected: HashMap<Utf8PathBuf, usize> = HashMap::new();
             for f in &result.external_failures {
@@ -137,7 +163,7 @@ impl GraphIndex {
                     continue;
                 }
 
-                let dst_idx = get_or_insert(&mut graph, &mut node_map, resolved);
+                let dst_idx = get_or_insert_node(&mut graph, &mut node_map, resolved);
                 if let Some(e) = graph.find_edge(src_idx, dst_idx) {
                     graph[e].failure_count += count;
                 } else {
@@ -148,6 +174,47 @@ impl GraphIndex {
                             failure_count: count,
                         },
                     );
+                }
+            }
+        }
+
+        GraphIndex { graph }
+    }
+
+    pub fn build_from_source_imports(
+        source_files: &[Utf8PathBuf],
+        repo_root: &std::path::Path,
+    ) -> Self {
+        let module_map = build_module_map(source_files);
+        let mut graph = CouplingGraph::new();
+        let mut node_map: HashMap<Utf8PathBuf, NodeIndex> = HashMap::new();
+
+        for file in source_files {
+            let abs = repo_root.join(file.as_str());
+            let Ok(source) = std::fs::read(&abs) else {
+                continue;
+            };
+            let Some(parsed) = crate::python_ast::ParsedFile::parse(&source) else {
+                continue;
+            };
+
+            for imp in crate::python_ast::find_imports(&parsed) {
+                for module_name in crate::python_ast::extract_module_names(&imp.module_path) {
+                    let Some(target) = module_map.get(&module_name) else {
+                        continue;
+                    };
+                    if target == file {
+                        continue;
+                    }
+                    // Edge: target (dependency) → file (importer/depender)
+                    // Matches build() semantics: src=dependency, dst=depender
+                    let target_idx = get_or_insert_node(&mut graph, &mut node_map, target.clone());
+                    let file_idx = get_or_insert_node(&mut graph, &mut node_map, file.clone());
+                    if let Some(e) = graph.find_edge(target_idx, file_idx) {
+                        graph[e].failure_count += 1;
+                    } else {
+                        graph.add_edge(target_idx, file_idx, CouplingEdge { failure_count: 1 });
+                    }
                 }
             }
         }
@@ -407,5 +474,83 @@ mod tests {
             &[Utf8PathBuf::from("src/order.py")],
         );
         assert_eq!(actual, None);
+    }
+
+    #[test]
+    fn test_build_module_map_should_include_all_dotted_suffixes() {
+        let files = vec![Utf8PathBuf::from("src/domain/order.py")];
+        let map = build_module_map(&files);
+        assert_eq!(
+            map.get("src.domain.order"),
+            Some(&Utf8PathBuf::from("src/domain/order.py"))
+        );
+        assert_eq!(
+            map.get("domain.order"),
+            Some(&Utf8PathBuf::from("src/domain/order.py"))
+        );
+        assert_eq!(
+            map.get("order"),
+            Some(&Utf8PathBuf::from("src/domain/order.py"))
+        );
+    }
+
+    #[test]
+    fn test_build_module_map_init_file_should_map_to_package_name() {
+        let files = vec![Utf8PathBuf::from("src/domain/__init__.py")];
+        let map = build_module_map(&files);
+        assert_eq!(
+            map.get("src.domain"),
+            Some(&Utf8PathBuf::from("src/domain/__init__.py"))
+        );
+        assert_eq!(
+            map.get("domain"),
+            Some(&Utf8PathBuf::from("src/domain/__init__.py"))
+        );
+        assert!(!map.contains_key("__init__"));
+    }
+
+    #[test]
+    fn test_build_from_source_imports_should_add_edge_from_dependency_to_importer() {
+        // order.py imports billing → edge: billing → order (billing is the dependency)
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("order.py"), b"import billing\n").unwrap();
+        std::fs::write(root.join("billing.py"), b"").unwrap();
+
+        let files = vec![
+            Utf8PathBuf::from("order.py"),
+            Utf8PathBuf::from("billing.py"),
+        ];
+        let idx = GraphIndex::build_from_source_imports(&files, root);
+
+        assert_eq!(idx.graph.edge_count(), 1);
+        let edge = idx.graph.edge_indices().next().unwrap();
+        let (src, dst) = idx.graph.edge_endpoints(edge).unwrap();
+        assert_eq!(idx.graph[src].path, Utf8PathBuf::from("billing.py"));
+        assert_eq!(idx.graph[dst].path, Utf8PathBuf::from("order.py"));
+    }
+
+    #[test]
+    fn test_build_from_source_imports_should_not_add_self_edges() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("order.py"), b"import order\n").unwrap();
+
+        let files = vec![Utf8PathBuf::from("order.py")];
+        let idx = GraphIndex::build_from_source_imports(&files, root);
+
+        assert_eq!(idx.graph.edge_count(), 0);
+    }
+
+    #[test]
+    fn test_build_from_source_imports_should_skip_third_party_imports() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("order.py"), b"import requests\nimport os\n").unwrap();
+
+        let files = vec![Utf8PathBuf::from("order.py")];
+        let idx = GraphIndex::build_from_source_imports(&files, root);
+
+        assert_eq!(idx.graph.edge_count(), 0);
     }
 }

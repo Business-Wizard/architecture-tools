@@ -244,6 +244,35 @@ pub fn find_imports(parsed: &ParsedFile) -> Vec<ImportInfo> {
     results
 }
 
+pub fn extract_module_names(statement: &str) -> Vec<String> {
+    let s = statement.trim();
+    if let Some(rest) = s.strip_prefix("from ") {
+        let module_part = rest.split_whitespace().next().unwrap_or("");
+        if module_part.starts_with('.') {
+            return vec![];
+        }
+        let module =
+            module_part.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_');
+        if module.is_empty() {
+            return vec![];
+        }
+        vec![module.to_string()]
+    } else if let Some(rest) = s.strip_prefix("import ") {
+        rest.split(',')
+            .filter_map(|seg| {
+                let name = seg.split_whitespace().next().unwrap_or("");
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(name.to_string())
+                }
+            })
+            .collect()
+    } else {
+        vec![]
+    }
+}
+
 fn collect_imports(node: Node<'_>, source: &[u8], out: &mut Vec<ImportInfo>) {
     match node.kind() {
         "import_statement" | "import_from_statement" => {
@@ -267,6 +296,55 @@ fn collect_imports(node: Node<'_>, source: &[u8], out: &mut Vec<ImportInfo>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_module_names_import_single_should_return_module() {
+        assert_eq!(extract_module_names("import foo"), vec!["foo"]);
+    }
+
+    #[test]
+    fn test_extract_module_names_import_dotted_should_return_dotted_path() {
+        assert_eq!(extract_module_names("import foo.bar"), vec!["foo.bar"]);
+    }
+
+    #[test]
+    fn test_extract_module_names_import_multiple_should_return_all() {
+        let mut actual = extract_module_names("import foo, bar");
+        actual.sort();
+        assert_eq!(actual, vec!["bar", "foo"]);
+    }
+
+    #[test]
+    fn test_extract_module_names_import_with_alias_should_strip_alias() {
+        assert_eq!(
+            extract_module_names("import foo.bar as fb"),
+            vec!["foo.bar"]
+        );
+    }
+
+    #[test]
+    fn test_extract_module_names_from_import_should_return_module() {
+        assert_eq!(
+            extract_module_names("from foo.bar import Baz"),
+            vec!["foo.bar"]
+        );
+    }
+
+    #[test]
+    fn test_extract_module_names_relative_import_should_return_empty() {
+        assert_eq!(
+            extract_module_names("from . import sibling"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn test_extract_module_names_relative_dotted_should_return_empty() {
+        assert_eq!(
+            extract_module_names("from .sibling import X"),
+            Vec::<String>::new()
+        );
+    }
 
     #[test]
     fn test_plain_class_should_be_concrete() {

@@ -47,6 +47,7 @@ pub enum Commands {
 }
 
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct RunArgs {
     #[arg(long, help = "Path to the Python repository to analyse")]
     pub repo: Option<Utf8PathBuf>,
@@ -98,6 +99,12 @@ pub struct RunArgs {
 
     #[arg(long, help = "Exit non-zero if any fitness violations are found")]
     pub fail_on_violations: bool,
+
+    #[arg(
+        long,
+        help = "Build coupling graph from static import analysis (skips mutation execution)"
+    )]
+    pub fast: bool,
 }
 
 pub fn run() {
@@ -107,8 +114,98 @@ pub fn run() {
     }
 }
 
+fn run_fast_command(args: &RunArgs) {
+    let repo_root = match repo::resolve(args.repo.as_ref()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let cfg = match config::load(args.config.as_ref(), &repo_root) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error loading config: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let discovery = discovery::discover(&repo_root, &cfg);
+
+    if args.dry_run {
+        let c = &discovery.counts;
+        println!("\nCandidates discovered:");
+        println!("  functions:     {}", c.functions);
+        println!("  methods:       {}", c.methods);
+        println!("  constructors:  {}", c.constructors);
+        println!("  imports:       {}", c.imports);
+        println!("  modules:       {}", c.modules);
+        return;
+    }
+
+    let source_files: Vec<Utf8PathBuf> = {
+        let mut seen = std::collections::HashSet::new();
+        discovery
+            .candidates
+            .iter()
+            .map(|c| c.file.clone())
+            .filter(|f| seen.insert(f.clone()))
+            .collect()
+    };
+
+    println!(
+        "\n[fast] Building coupling graph from static import analysis ({} files)...",
+        source_files.len()
+    );
+
+    let graph_idx = GraphIndex::build_from_source_imports(&source_files, &repo_root);
+    let include_dirs: Vec<Utf8PathBuf> = cfg
+        .include_dirs
+        .iter()
+        .map(|s| Utf8PathBuf::from(s.as_str()))
+        .collect();
+    let abstractness_map = abstractness::compute(&repo_root, &include_dirs);
+    let metrics_result = metrics::compute(&graph_idx, &abstractness_map);
+    let empty_results: &[MutantResult] = &[];
+    let cluster_result = graph_analysis::analyse(&graph_idx, empty_results, &source_files);
+    let fitness_report = fitness::evaluate_all(&graph_idx, &metrics_result, &cfg.fitness);
+
+    let baseline = BaselineResult {
+        basedpyright: VerifierStatus::Pass,
+        pytest: VerifierStatus::Pass,
+    };
+
+    println!("[fast] Coupling graph built from static import analysis — no mutation data.\n");
+
+    terminal::print_report(
+        &baseline,
+        empty_results,
+        &cluster_result,
+        &metrics_result,
+        &fitness_report,
+    );
+
+    let report = RunReport::build(&baseline, empty_results, &cluster_result);
+
+    write_outputs(
+        args,
+        &graph_idx,
+        &report,
+        &metrics_result,
+        &cfg.fitness.main_sequence,
+    );
+
+    if args.fail_on_violations && fitness_report.has_errors() {
+        std::process::exit(2);
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_command(args: &RunArgs) {
+    if args.fast {
+        return run_fast_command(args);
+    }
     let repo_root = match repo::resolve(args.repo.as_ref()) {
         Ok(p) => p,
         Err(e) => {
