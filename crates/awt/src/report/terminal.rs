@@ -193,7 +193,7 @@ fn print_metrics_section(metrics: &MetricsResult) {
             Cell::new(node.file.as_str()),
             Cell::new(node.fan_in.to_string()),
             Cell::new(node.fan_out.to_string()),
-            Cell::new(format!("{:.2}", node.instability)),
+            Cell::new(format!("{:.2}", node.instability.as_f64())),
             Cell::new(format!("{:.2}", node.abstractness)),
             Cell::new(format!("{:.2}", node.distance)),
             status_cell,

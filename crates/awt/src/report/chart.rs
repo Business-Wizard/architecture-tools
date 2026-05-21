@@ -46,7 +46,7 @@ fn collect_points(metrics: &MetricsResult) -> Vec<ChartPoint> {
             let label = n.file.file_stem().unwrap_or(n.file.as_str()).to_owned();
             ChartPoint {
                 abstractness: n.abstractness,
-                instability: n.instability,
+                instability: n.instability.as_f64(),
                 label,
             }
         })
@@ -224,18 +224,19 @@ where
 mod tests {
     use super::*;
     use crate::graph::coupling_graph::FileRole;
-    use crate::graph::metrics::{MetricsResult, NodeMetrics};
+    use crate::graph::metrics::{Instability, MetricsResult, NodeMetrics};
     use camino::Utf8PathBuf;
     use tempfile::NamedTempFile;
 
     fn stub_node(abstractness: f64, instability: f64, role: FileRole) -> NodeMetrics {
-        let distance = (abstractness + instability - 1.0).abs();
+        let i = Instability::new(instability);
+        let distance = (abstractness + i.as_f64() - 1.0).abs();
         NodeMetrics {
             file: Utf8PathBuf::from("src/x.py"),
             role,
             fan_in: 1,
             fan_out: 1,
-            instability,
+            instability: i,
             abstractness,
             distance,
             distance_warning: distance > 0.3,

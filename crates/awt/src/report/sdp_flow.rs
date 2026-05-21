@@ -9,7 +9,9 @@ use plotters::style::text_anchor::{HPos, Pos, VPos};
 use plotters::style::{Color, IntoFont};
 
 use crate::graph::coupling_graph::{FileRole, GraphIndex};
-use crate::graph::metrics::MetricsResult;
+use crate::graph::metrics::{
+    Dependency, Depender, INSTABILITY_EPSILON, Instability, MetricsResult, violates_sdp,
+};
 
 const CHART_WIDTH: u32 = 900;
 const ROW_HEIGHT: u32 = 28;
@@ -21,43 +23,73 @@ const PLOT_WIDTH: u32 = CHART_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
 const ARROW_HEAD_LEN: i32 = 10;
 const ARROW_HEAD_WIDTH: i32 = 5;
 const MAX_ROWS: usize = 40;
-const EPSILON: f64 = 0.01;
 
 const COLOUR_HEALTHY: RGBColor = RGBColor(30, 160, 70);
 const COLOUR_VIOLATION: RGBColor = RGBColor(200, 50, 40);
 const COLOUR_NEUTRAL: RGBColor = RGBColor(130, 130, 130);
 
-struct FlowEdge {
-    i_src: f64,
-    i_dst: f64,
-    src_label: String,
-    dst_label: String,
+/// Encapsulates axis orientation: unstable (I=1) left, stable (I=0) right.
+struct StabilityAxis;
+
+impl StabilityAxis {
+    fn x_pos(i: Instability) -> i32 {
+        #[allow(clippy::cast_possible_truncation)]
+        let offset = ((1.0 - i.as_f64()) * f64::from(PLOT_WIDTH)) as i32;
+        i32::try_from(MARGIN_LEFT).unwrap_or(0) + offset
+    }
 }
 
-impl FlowEdge {
+/// A directed dependency edge for the SDP chart. Depender depends on Dependency.
+/// Constructed from coupling-graph edges via `from_coupling_edge` — the only site
+/// where graph direction (src=mutation source) is translated to dependency direction.
+struct SdpEdge {
+    depender: Depender,
+    dependency: Dependency,
+    depender_label: String,
+    dependency_label: String,
+}
+
+impl SdpEdge {
+    /// Graph edge src→dst means "mutating src broke dst", so dst is the depender and src is the dependency.
+    fn from_coupling_edge(
+        graph_src: Dependency,
+        graph_dst: Depender,
+        depender_label: String,
+        dependency_label: String,
+    ) -> Self {
+        Self {
+            depender: graph_dst,
+            dependency: graph_src,
+            depender_label,
+            dependency_label,
+        }
+    }
+
     fn is_violation(&self) -> bool {
-        self.i_src - self.i_dst > EPSILON
+        violates_sdp(self.dependency, self.depender)
     }
 
     fn colour(&self) -> RGBColor {
-        if self.i_dst - self.i_src > EPSILON {
-            COLOUR_HEALTHY
-        } else if self.i_src - self.i_dst > EPSILON {
+        let i_dep = self.dependency.0.as_f64();
+        let i_per = self.depender.0.as_f64();
+        if i_per - i_dep > INSTABILITY_EPSILON {
             COLOUR_VIOLATION
+        } else if i_dep - i_per > INSTABILITY_EPSILON {
+            COLOUR_HEALTHY
         } else {
             COLOUR_NEUTRAL
         }
     }
 }
 
-fn collect_edges(idx: &GraphIndex, metrics: &MetricsResult) -> Vec<FlowEdge> {
-    let instability_map: HashMap<_, f64> = metrics
+fn collect_edges(idx: &GraphIndex, metrics: &MetricsResult) -> Vec<SdpEdge> {
+    let instability_map: HashMap<_, Instability> = metrics
         .nodes
         .iter()
         .map(|n| (&n.file, n.instability))
         .collect();
 
-    let mut edges: Vec<FlowEdge> = idx
+    let mut edges: Vec<SdpEdge> = idx
         .graph
         .edge_indices()
         .filter_map(|e| {
@@ -67,24 +99,25 @@ fn collect_edges(idx: &GraphIndex, metrics: &MetricsResult) -> Vec<FlowEdge> {
             if src_node.role != FileRole::Source || dst_node.role != FileRole::Source {
                 return None;
             }
-            let i_src = *instability_map.get(&src_node.path)?;
-            let i_dst = *instability_map.get(&dst_node.path)?;
-            let src_label = src_node
-                .path
-                .file_stem()
-                .unwrap_or(src_node.path.as_str())
-                .to_owned();
-            let dst_label = dst_node
+            // Graph edge (src→dst) means "mutating src broke dst", so dst depends on src.
+            let i_dependency = *instability_map.get(&src_node.path)?;
+            let i_depender = *instability_map.get(&dst_node.path)?;
+            let depender_label = dst_node
                 .path
                 .file_stem()
                 .unwrap_or(dst_node.path.as_str())
                 .to_owned();
-            Some(FlowEdge {
-                i_src,
-                i_dst,
-                src_label,
-                dst_label,
-            })
+            let dependency_label = src_node
+                .path
+                .file_stem()
+                .unwrap_or(src_node.path.as_str())
+                .to_owned();
+            Some(SdpEdge::from_coupling_edge(
+                Dependency(i_dependency),
+                Depender(i_depender),
+                depender_label,
+                dependency_label,
+            ))
         })
         .collect();
 
@@ -92,25 +125,19 @@ fn collect_edges(idx: &GraphIndex, metrics: &MetricsResult) -> Vec<FlowEdge> {
     edges.sort_by(|a, b| {
         b.is_violation()
             .cmp(&a.is_violation())
-            .then(a.src_label.cmp(&b.src_label))
+            .then(a.depender_label.cmp(&b.depender_label))
     });
     edges
 }
 
-fn x_for_i(i: f64) -> i32 {
-    #[allow(clippy::cast_possible_truncation)]
-    let offset = (i.clamp(0.0, 1.0) * f64::from(PLOT_WIDTH)) as i32;
-    i32::try_from(MARGIN_LEFT).unwrap_or(0) + offset
-}
-
 fn draw_arrow(
     area: &plotters::drawing::DrawingArea<BitMapBackend<'_>, plotters::coord::Shift>,
-    edge: &FlowEdge,
+    edge: &SdpEdge,
     row_y: i32,
     colour: RGBColor,
 ) -> io::Result<()> {
-    let x_src = x_for_i(edge.i_src);
-    let x_dst = x_for_i(edge.i_dst);
+    let x_src = StabilityAxis::x_pos(edge.depender.0);
+    let x_dst = StabilityAxis::x_pos(edge.dependency.0);
 
     // Shaft
     area.draw(&PathElement::new(
@@ -129,28 +156,31 @@ fn draw_arrow(
 
     let label_style = ("sans-serif", 11).into_font().color(&colour);
 
-    // Source label: right-aligned at left margin
-    let src_x = i32::try_from(MARGIN_LEFT).unwrap_or(0) - 6;
+    // Labels sit just outside the arrow's start and end points.
+    // Use outward-facing alignment so text never overlaps the shaft.
+    let (src_align, dst_align) = if x_src <= x_dst {
+        (HPos::Right, HPos::Left)
+    } else {
+        (HPos::Left, HPos::Right)
+    };
     area.draw(&Text::new(
-        edge.src_label.clone(),
-        (src_x, row_y - 6),
-        label_style.clone().pos(Pos::new(HPos::Right, VPos::Top)),
+        edge.depender_label.clone(),
+        (x_src - if x_src <= x_dst { 6 } else { -6 }, row_y - 6),
+        label_style.clone().pos(Pos::new(src_align, VPos::Top)),
     ))
     .map_err(|e| io::Error::other(e.to_string()))?;
 
-    // Dest label: left-aligned at right margin start
-    let dst_x = i32::try_from(CHART_WIDTH - MARGIN_RIGHT).unwrap_or(0) + 6;
     area.draw(&Text::new(
-        edge.dst_label.clone(),
-        (dst_x, row_y - 6),
-        label_style.pos(Pos::new(HPos::Left, VPos::Top)),
+        edge.dependency_label.clone(),
+        (x_dst + if x_src <= x_dst { 6 } else { -6 }, row_y - 6),
+        label_style.pos(Pos::new(dst_align, VPos::Top)),
     ))
     .map_err(|e| io::Error::other(e.to_string()))?;
 
     Ok(())
 }
 
-fn render_sdp_flow(edges: &[FlowEdge], path: &Utf8Path) -> io::Result<()> {
+fn render_sdp_flow(edges: &[SdpEdge], path: &Utf8Path) -> io::Result<()> {
     let n_rows = edges.len().min(MAX_ROWS);
     let n_rows_u32 = u32::try_from(n_rows).unwrap_or(u32::MAX);
     let total_height = MARGIN_TOP + n_rows_u32 * ROW_HEIGHT + MARGIN_BOTTOM;
@@ -185,7 +215,7 @@ fn render_sdp_flow(edges: &[FlowEdge], path: &Utf8Path) -> io::Result<()> {
         .into_font()
         .color(&plotters::style::BLACK);
     for &tick in &[0.0_f64, 0.25, 0.5, 0.75, 1.0] {
-        let tx = x_for_i(tick);
+        let tx = StabilityAxis::x_pos(Instability::new(tick));
         root.draw(&PathElement::new(
             vec![(tx, axis_y), (tx, axis_y + 4)],
             plotters::style::BLACK.stroke_width(1),
@@ -204,7 +234,7 @@ fn render_sdp_flow(edges: &[FlowEdge], path: &Utf8Path) -> io::Result<()> {
         .into_font()
         .color(&plotters::style::BLACK);
     root.draw(&Text::new(
-        "Instability (I)   stable \u{2192} unstable",
+        "Instability (I)   unstable \u{2190} stable",
         (i32::try_from(CHART_WIDTH / 2).unwrap_or(0), axis_y + 20),
         axis_label_style.pos(Pos::new(HPos::Center, VPos::Top)),
     ))
@@ -366,18 +396,15 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_edges_healthy_dependency_should_have_i_src_less_than_i_dst() {
-        // a→b: a has fan_out=1, b has fan_in=1 → I_a=1.0, I_b=0.0
-        // but we want healthy (I_src < I_dst), so use b→a (b stable, a unstable)
+    fn test_collect_edges_should_have_instability_values_in_unit_range() {
+        // b→a: b has fan_out=1 (I=1.0), a has fan_in=1 (I=0.0).
+        // In SDP terms: a depends on b → depender=a (I=1.0), dependency=b (I=0.0).
         let idx = source_source_graph("src/b.py", "src/a.py");
         let m = stub_metrics(&idx);
         let edges = collect_edges(&idx, &m);
         assert_eq!(edges.len(), 1);
-        // b→a: b has fan_out=1 (I=1.0), a has fan_in=1 (I=0.0) — this is a violation
-        // To get a healthy edge we need fan_out < fan_in for src, which requires multiple edges.
-        // Just assert the edge exists and i values are in [0,1].
-        assert!((0.0..=1.0).contains(&edges[0].i_src));
-        assert!((0.0..=1.0).contains(&edges[0].i_dst));
+        assert!((0.0..=1.0).contains(&edges[0].depender.0.as_f64()));
+        assert!((0.0..=1.0).contains(&edges[0].dependency.0.as_f64()));
     }
 
     #[test]

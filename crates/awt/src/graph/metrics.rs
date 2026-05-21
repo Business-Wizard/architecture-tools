@@ -4,13 +4,43 @@ use petgraph::Direction;
 use crate::graph::abstractness::AbstractnessMap;
 use crate::graph::coupling_graph::{FileRole, GraphIndex};
 
+pub const INSTABILITY_EPSILON: f64 = 0.01;
+
+/// Instability I ∈ [0,1]: 0 = maximally stable, 1 = maximally unstable.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Instability(f64);
+
+impl Instability {
+    pub fn new(value: f64) -> Self {
+        Self(value.clamp(0.0, 1.0))
+    }
+
+    pub fn as_f64(self) -> f64 {
+        self.0
+    }
+}
+
+/// Role newtype: the module that depends on something (coupling-graph dst node).
+#[derive(Debug, Clone, Copy)]
+pub struct Depender(pub Instability);
+
+/// Role newtype: the module that is depended upon (coupling-graph src node).
+#[derive(Debug, Clone, Copy)]
+pub struct Dependency(pub Instability);
+
+/// Returns true when the depender is more unstable than its dependency — an SDP violation.
+/// SDP: a module should not be more unstable than the modules it depends upon.
+pub fn violates_sdp(dependency: Dependency, depender: Depender) -> bool {
+    depender.0.as_f64() > dependency.0.as_f64() + INSTABILITY_EPSILON
+}
+
 #[derive(Debug)]
 pub struct NodeMetrics {
     pub file: Utf8PathBuf,
     pub role: FileRole,
     pub fan_in: usize,
     pub fan_out: usize,
-    pub instability: f64,
+    pub instability: Instability,
     pub abstractness: f64,
     pub distance: f64,
     pub distance_warning: bool,
@@ -28,17 +58,20 @@ pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResul
         .node_indices()
         .map(|n| {
             let node = &idx.graph[n];
-            let fan_out = idx.graph.edges_directed(n, Direction::Outgoing).count();
-            let fan_in = idx.graph.edges_directed(n, Direction::Incoming).count();
+            // Coupling graph edge A→B means "mutating A broke B", i.e. B depends on A.
+            // Outgoing edges from A = things that depend on A = A's afferent coupling (fan-in).
+            // Incoming edges to A = things A depends on = A's efferent coupling (fan-out).
+            let fan_in = idx.graph.edges_directed(n, Direction::Outgoing).count();
+            let fan_out = idx.graph.edges_directed(n, Direction::Incoming).count();
 
             // Isolated nodes (no edges) default to I=1.0: no-abstractions + maximally-unstable
             // sits on the main sequence (distance=0), avoiding false violations.
             #[allow(clippy::cast_precision_loss)]
-            let instability = if fan_in + fan_out == 0 {
+            let instability = Instability::new(if fan_in + fan_out == 0 {
                 1.0
             } else {
                 fan_out as f64 / (fan_in + fan_out) as f64
-            };
+            });
 
             // Files with no class definitions default to A=0.0 (fully concrete).
             let abstractness = abstractness
@@ -47,7 +80,7 @@ pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResul
                 .and_then(|s| s.value)
                 .unwrap_or(0.0);
 
-            let distance = (abstractness + instability - 1.0).abs();
+            let distance = (abstractness + instability.as_f64() - 1.0).abs();
             let distance_warning = distance > 0.3;
             let distance_failure = distance > 0.5;
 
@@ -127,26 +160,32 @@ mod tests {
             .find(|n| n.file.as_str() == "src/isolated.py")
             .expect("node should exist");
 
-        assert_eq!(isolated.instability, 1.0);
+        assert_eq!(isolated.instability, Instability::new(1.0));
     }
 
     #[test]
-    fn test_pure_fan_out_node_should_have_instability_one() {
+    fn test_node_broken_by_many_mutations_should_have_instability_one() {
+        // hub→a and hub→b: mutating hub breaks a and b, so a and b depend on hub.
+        // hub has high afferent coupling (many dependents) → I=0 (stable).
+        // a and b have no dependents and depend on hub → I=1 (unstable).
         let idx = make_graph_index(&[("src/hub.py", "src/a.py"), ("src/hub.py", "src/b.py")]);
         let abstractness = empty_abstractness();
         let result = compute(&idx, &abstractness);
 
-        let hub = result
+        let a = result
             .nodes
             .iter()
-            .find(|n| n.file.as_str() == "src/hub.py")
+            .find(|n| n.file.as_str() == "src/a.py")
             .expect("node should exist");
 
-        assert_eq!(hub.instability, 1.0);
+        assert_eq!(a.instability, Instability::new(1.0));
     }
 
     #[test]
-    fn test_pure_fan_in_node_should_have_instability_zero() {
+    fn test_node_whose_mutations_break_many_should_have_instability_zero() {
+        // a→consumer and b→consumer: mutating a or b breaks consumer, so consumer depends on both.
+        // consumer has no outgoing coupling edges → nothing depends on consumer → I=1 (unstable).
+        // a and b each break consumer → consumer depends on them → a and b are stable (I=0).
         let idx = make_graph_index(&[
             ("src/a.py", "src/consumer.py"),
             ("src/b.py", "src/consumer.py"),
@@ -154,13 +193,13 @@ mod tests {
         let abstractness = empty_abstractness();
         let result = compute(&idx, &abstractness);
 
-        let consumer = result
+        let a = result
             .nodes
             .iter()
-            .find(|n| n.file.as_str() == "src/consumer.py")
+            .find(|n| n.file.as_str() == "src/a.py")
             .expect("node should exist");
 
-        assert_eq!(consumer.instability, 0.0);
+        assert_eq!(a.instability, Instability::new(0.0));
     }
 
     #[test]
@@ -178,7 +217,7 @@ mod tests {
             .find(|n| n.file.as_str() == "src/balanced.py")
             .expect("node should exist");
 
-        assert_eq!(balanced.instability, 0.5);
+        assert_eq!(balanced.instability, Instability::new(0.5));
     }
 
     #[test]
@@ -188,7 +227,7 @@ mod tests {
             role: FileRole::Source,
             fan_in: 1,
             fan_out: 1,
-            instability: 0.5,
+            instability: Instability::new(0.5),
             abstractness: 0.0,
             distance: 0.4,
             distance_warning: true,
@@ -206,7 +245,7 @@ mod tests {
             role: FileRole::Source,
             fan_in: 1,
             fan_out: 1,
-            instability: 0.5,
+            instability: Instability::new(0.5),
             abstractness: 0.0,
             distance: 0.6,
             distance_warning: true,

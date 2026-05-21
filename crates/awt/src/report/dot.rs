@@ -40,12 +40,12 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
     let instability_map: HashMap<_, f64> = metrics
         .nodes
         .iter()
-        .map(|n| (&n.file, n.instability))
+        .map(|n| (&n.file, n.instability.as_f64()))
         .collect();
 
     let mut out = String::new();
     writeln!(out, "digraph coupling {{").unwrap();
-    writeln!(out, "    rankdir=LR;").unwrap();
+    writeln!(out, "    rankdir=RL;").unwrap();
 
     for &n in &source_nodes {
         let node = &idx.graph[n];
@@ -206,14 +206,17 @@ mod tests {
     }
 
     #[test]
-    fn test_render_should_show_instability_one_for_pure_fan_out_node() {
+    fn test_render_should_show_instability_one_for_dependent_node() {
+        // domain→service in coupling graph: service depends on domain.
+        // service has no dependents → I=1.00 (unstable).
         let idx = fixture_source_only();
         let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("I=1.00"));
     }
 
     #[test]
-    fn test_render_should_show_instability_zero_for_pure_fan_in_node() {
+    fn test_render_should_show_instability_zero_for_depended_on_node() {
+        // domain→service in coupling graph: domain is depended on by service → I=0.00 (stable).
         let idx = fixture_source_only();
         let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("I=0.00"));

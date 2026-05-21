@@ -4,7 +4,7 @@ use camino::Utf8PathBuf;
 
 use crate::config::FitnessConfig;
 use crate::graph::coupling_graph::{FileRole, GraphIndex};
-use crate::graph::metrics::MetricsResult;
+use crate::graph::metrics::{Dependency, Depender, Instability, MetricsResult, violates_sdp};
 use crate::model::{DistanceBand, RuleId, Severity, Violation, ViolationDetail};
 
 use super::layer_config;
@@ -84,7 +84,7 @@ pub fn sdp_stable_dependencies(
         return vec![];
     }
 
-    let instability_map: HashMap<Utf8PathBuf, f64> = metrics
+    let instability_map: HashMap<Utf8PathBuf, Instability> = metrics
         .nodes
         .iter()
         .map(|n| (n.file.clone(), n.instability))
@@ -97,14 +97,18 @@ pub fn sdp_stable_dependencies(
         let source = &idx.graph[src_idx].path;
         let target = &idx.graph[dst_idx].path;
 
-        let Some(&i_src) = instability_map.get(source) else {
+        // Graph edge src→dst means "mutating src broke dst", so dst depends on src.
+        // dependency = src (what is depended upon), depender = dst (what depends on it).
+        let Some(&i_dependency) = instability_map.get(source) else {
             continue;
         };
-        let Some(&i_dst) = instability_map.get(target) else {
+        let Some(&i_depender) = instability_map.get(target) else {
             continue;
         };
 
-        if i_dst > i_src + 0.001 {
+        if violates_sdp(Dependency(i_dependency), Depender(i_depender)) {
+            let i_src = i_dependency.as_f64();
+            let i_dst = i_depender.as_f64();
             let delta = i_dst - i_src;
             let target_short = target.file_name().unwrap_or(target.as_str());
             let source_short = source.file_name().unwrap_or(source.as_str());
@@ -175,7 +179,7 @@ pub fn main_sequence_distance(metrics: &MetricsResult, config: &FitnessConfig) -
             detail: ViolationDetail::DistanceViolation {
                 file,
                 abstractness: node.abstractness,
-                instability: node.instability,
+                instability: node.instability.as_f64(),
                 distance: d,
                 band,
             },
@@ -246,7 +250,7 @@ mod tests {
     use super::*;
     use crate::config::{AdpConfig, FitnessConfig, LayerConfig, MainSequenceConfig, SdpConfig};
     use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode};
-    use crate::graph::metrics::NodeMetrics;
+    use crate::graph::metrics::{Instability, NodeMetrics};
     use std::collections::HashMap;
 
     fn make_graph(edges: &[(&str, &str)]) -> GraphIndex {
@@ -291,7 +295,7 @@ mod tests {
                     role: FileRole::Source,
                     fan_in: 0,
                     fan_out: 0,
-                    instability: *i,
+                    instability: Instability::new(*i),
                     abstractness: *a,
                     distance: *d,
                     distance_warning: *d > 0.3,
