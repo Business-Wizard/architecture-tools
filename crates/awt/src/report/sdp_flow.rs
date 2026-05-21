@@ -27,6 +27,8 @@ const MAX_ROWS: usize = 40;
 const COLOUR_HEALTHY: RGBColor = RGBColor(30, 160, 70);
 const COLOUR_VIOLATION: RGBColor = RGBColor(200, 50, 40);
 const COLOUR_NEUTRAL: RGBColor = RGBColor(130, 130, 130);
+const COLOUR_STEEP: RGBColor = RGBColor(220, 160, 0);
+const STEEP_JUMP_THRESHOLD: f64 = 0.5;
 
 /// Encapsulates axis orientation: stable (I=0) left, unstable (I=1) right.
 /// Arrows flow left→right, from depender toward dependency (stable on left).
@@ -70,11 +72,18 @@ impl SdpEdge {
         violates_sdp(self.dependency, self.depender)
     }
 
+    fn is_steep(&self) -> bool {
+        let delta = self.depender.0.as_f64() - self.dependency.0.as_f64();
+        !self.is_violation() && delta >= STEEP_JUMP_THRESHOLD
+    }
+
     fn colour(&self) -> RGBColor {
         let i_dep = self.dependency.0.as_f64();
         let i_per = self.depender.0.as_f64();
         if i_dep - i_per > INSTABILITY_EPSILON {
             COLOUR_VIOLATION
+        } else if i_per - i_dep >= STEEP_JUMP_THRESHOLD {
+            COLOUR_STEEP
         } else if i_per - i_dep > INSTABILITY_EPSILON {
             COLOUR_HEALTHY
         } else {
@@ -122,10 +131,11 @@ fn collect_edges(idx: &GraphIndex, metrics: &MetricsResult) -> Vec<SdpEdge> {
         })
         .collect();
 
-    // Violations first, then healthy edges
+    // Violations first, then steep jumps, then healthy, then neutral
     edges.sort_by(|a, b| {
         b.is_violation()
             .cmp(&a.is_violation())
+            .then(b.is_steep().cmp(&a.is_steep()))
             .then(a.depender_label.cmp(&b.depender_label))
     });
     edges
@@ -370,6 +380,28 @@ mod tests {
         let idx = GraphIndex { graph };
         let m = stub_metrics(&idx);
         (idx, m)
+    }
+
+    #[test]
+    fn test_sdp_edge_colour_should_be_steep_for_large_healthy_jump() {
+        let edge = SdpEdge::from_coupling_edge(
+            Dependency(Instability::new(0.0)),
+            Depender(Instability::new(1.0)),
+            "depender".into(),
+            "dependency".into(),
+        );
+        assert_eq!(edge.colour(), COLOUR_STEEP);
+    }
+
+    #[test]
+    fn test_sdp_edge_colour_should_be_green_for_small_healthy_jump() {
+        let edge = SdpEdge::from_coupling_edge(
+            Dependency(Instability::new(0.3)),
+            Depender(Instability::new(0.6)),
+            "depender".into(),
+            "dependency".into(),
+        );
+        assert_eq!(edge.colour(), COLOUR_HEALTHY);
     }
 
     #[test]
