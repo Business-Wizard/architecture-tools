@@ -346,4 +346,66 @@ mod tests {
         let idx = GraphIndex::build(&[result], &known);
         assert_eq!(idx.graph.edge_count(), 1);
     }
+
+    #[test]
+    fn test_build_with_multiple_test_failures_should_produce_one_edge_per_resolved_source() {
+        let result = make_result(
+            "src/billing.py",
+            &[
+                "tests/test_order.py",
+                "tests/test_payment.py",
+                "tests/test_invoice.py",
+            ],
+        );
+        let known = vec![
+            Utf8PathBuf::from("src/billing.py"),
+            Utf8PathBuf::from("src/order.py"),
+            Utf8PathBuf::from("src/payment.py"),
+            Utf8PathBuf::from("src/invoice.py"),
+        ];
+        let idx = GraphIndex::build(&[result], &known);
+        assert_eq!(idx.graph.edge_count(), 3);
+    }
+
+    #[test]
+    fn test_build_with_multiple_test_failures_should_accumulate_weight_when_resolved_to_same_target()
+     {
+        // Two different test files that both resolve to src/order.py
+        // (would happen if a repo has both tests/test_order.py and tests/order_test.py)
+        let result = make_result(
+            "src/billing.py",
+            &["tests/test_order.py", "tests/order_test.py"],
+        );
+        let known = vec![
+            Utf8PathBuf::from("src/billing.py"),
+            Utf8PathBuf::from("src/order.py"),
+        ];
+        let idx = GraphIndex::build(&[result], &known);
+        assert_eq!(idx.graph.edge_count(), 1);
+        let edge = idx.graph.edge_indices().next().unwrap();
+        assert_eq!(idx.graph[edge].failure_count, 2);
+    }
+
+    #[test]
+    fn test_resolve_source_module_with_equal_prefix_length_should_tie_break_alphabetically() {
+        // both candidates have the same common prefix with the test parent
+        let actual = resolve_source_module(
+            &Utf8PathBuf::from("tests/test_order.py"),
+            &[
+                Utf8PathBuf::from("alpha/order.py"),
+                Utf8PathBuf::from("zeta/order.py"),
+            ],
+        );
+        assert_eq!(actual, Some(Utf8PathBuf::from("zeta/order.py")));
+    }
+
+    #[test]
+    fn test_resolve_source_module_with_no_stem_should_return_none() {
+        // Utf8PathBuf::from(".py") has no file stem — exercise the `?` early-exit
+        let actual = resolve_source_module(
+            &Utf8PathBuf::from("tests/.py"),
+            &[Utf8PathBuf::from("src/order.py")],
+        );
+        assert_eq!(actual, None);
+    }
 }

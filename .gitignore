@@ -150,6 +150,7 @@ result-*
 
 # awt output files
 coupling.dot
+main_sequence.png
 
 # Beads / Dolt files (added by bd init)
 .dolt/
