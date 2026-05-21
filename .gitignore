@@ -3,6 +3,11 @@ typings/
 .vscode/settings.json
 mvp_base/
 
+# awt output files
+coupling.dot
+main_sequence.png
+sdp_flow.png
+
 
 # Rust Cargo
 /target
@@ -147,10 +152,6 @@ dmypy.json
 # Nix build symlinks (result, result-2, result-N)
 result
 result-*
-
-# awt output files
-coupling.dot
-main_sequence.png
 
 # Beads / Dolt files (added by bd init)
 .dolt/
