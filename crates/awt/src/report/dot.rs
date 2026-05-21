@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as FmtWrite;
 use std::io;
 
@@ -7,9 +7,10 @@ use petgraph::algo::tarjan_scc;
 use petgraph::graph::NodeIndex;
 
 use crate::graph::coupling_graph::{FileRole, GraphIndex};
+use crate::graph::metrics::MetricsResult;
 
-pub fn write_dot(idx: &GraphIndex, path: &Utf8Path) -> io::Result<()> {
-    let dot = render(idx);
+pub fn write_dot(idx: &GraphIndex, metrics: &MetricsResult, path: &Utf8Path) -> io::Result<()> {
+    let dot = render(idx, metrics);
     std::fs::write(path.as_std_path(), dot)
 }
 
@@ -28,12 +29,18 @@ fn penwidth(count: usize) -> f32 {
     1.0_f32 + f32::from(u16::try_from(capped).unwrap_or(u16::MAX)).sqrt()
 }
 
-fn render(idx: &GraphIndex) -> String {
+fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
     let cycles = cycle_nodes(idx);
     let source_nodes: HashSet<NodeIndex> = idx
         .graph
         .node_indices()
         .filter(|&n| idx.graph[n].role == FileRole::Source)
+        .collect();
+
+    let instability_map: HashMap<_, f64> = metrics
+        .nodes
+        .iter()
+        .map(|n| (&n.file, n.instability))
         .collect();
 
     let mut out = String::new();
@@ -42,7 +49,8 @@ fn render(idx: &GraphIndex) -> String {
 
     for &n in &source_nodes {
         let node = &idx.graph[n];
-        let label = node.path.as_str().replace('"', "\\\"");
+        let i = instability_map.get(&node.path).copied().unwrap_or(0.0);
+        let label = format!("{}\\nI={:.2}", node.path.as_str().replace('"', "\\\""), i);
         let attrs = if cycles.contains(&n) {
             "shape=box style=filled fillcolor=lightcoral"
         } else {
@@ -74,7 +82,9 @@ fn render(idx: &GraphIndex) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::abstractness::AbstractnessMap;
     use crate::graph::coupling_graph::GraphIndex;
+    use crate::graph::metrics;
     use crate::model::{
         Candidate, CandidateKind, FailureCategory, FailureEvent, FailureScope, MutantId,
         MutantResult, MutantStatus, OperatorKind, VerifierKind,
@@ -114,6 +124,15 @@ mod tests {
         }
     }
 
+    fn stub_metrics(idx: &GraphIndex) -> MetricsResult {
+        metrics::compute(
+            idx,
+            &AbstractnessMap {
+                by_file: std::collections::HashMap::new(),
+            },
+        )
+    }
+
     fn fixture_source_only() -> GraphIndex {
         GraphIndex::build(&[make_result("src/domain.py", &["src/service.py"])], &[])
     }
@@ -127,7 +146,8 @@ mod tests {
 
     #[test]
     fn test_render_should_produce_valid_dot_with_source_nodes_and_edges() {
-        let dot = render(&fixture_source_only());
+        let idx = fixture_source_only();
+        let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("digraph coupling {"));
         assert!(dot.contains("src/domain.py"));
         assert!(dot.contains("src/service.py"));
@@ -136,42 +156,74 @@ mod tests {
 
     #[test]
     fn test_render_should_exclude_test_nodes_from_dot() {
-        let dot = render(&fixture_source_to_test());
+        let idx = fixture_source_to_test();
+        let dot = render(&idx, &stub_metrics(&idx));
         assert!(!dot.contains("tests/test_domain.py"));
     }
 
     #[test]
     fn test_render_should_exclude_edges_to_test_nodes() {
-        let dot = render(&fixture_source_to_test());
+        let idx = fixture_source_to_test();
+        let dot = render(&idx, &stub_metrics(&idx));
         assert!(!dot.contains("->"));
     }
 
     #[test]
     fn test_source_file_should_use_box_shape() {
-        let dot = render(&fixture_source_only());
+        let idx = fixture_source_only();
+        let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("shape=box"));
     }
 
     #[test]
     fn test_edge_should_have_penwidth() {
-        let dot = render(&fixture_source_only());
+        let idx = fixture_source_only();
+        let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("penwidth="));
     }
 
     #[test]
     fn test_cycle_nodes_should_get_lightcoral_fill() {
-        // A→B and B→A creates a cycle
         let results = vec![
             make_result("src/a.py", &["src/b.py"]),
             make_result("src/b.py", &["src/a.py"]),
         ];
         let idx = GraphIndex::build(&results, &[]);
-        let dot = render(&idx);
+        let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("lightcoral"));
     }
 
     #[test]
     fn test_penwidth_grows_with_count() {
         assert!(penwidth(9) > penwidth(1));
+    }
+
+    #[test]
+    fn test_render_should_include_instability_label_on_nodes() {
+        let idx = fixture_source_only();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains("I="));
+    }
+
+    #[test]
+    fn test_render_should_show_instability_one_for_pure_fan_out_node() {
+        let idx = fixture_source_only();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains("I=1.00"));
+    }
+
+    #[test]
+    fn test_render_should_show_instability_zero_for_pure_fan_in_node() {
+        let idx = fixture_source_only();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains("I=0.00"));
+    }
+
+    #[test]
+    fn test_render_with_empty_metrics_should_not_panic() {
+        let idx = fixture_source_only();
+        let empty = MetricsResult { nodes: vec![] };
+        let dot = render(&idx, &empty);
+        assert!(dot.contains("digraph coupling {"));
     }
 }

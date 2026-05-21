@@ -25,6 +25,7 @@ use crate::mutations::{
 use crate::repo;
 use crate::report::chart;
 use crate::report::dot;
+use crate::report::sdp_flow;
 use crate::report::summary::{self, RunReport};
 use crate::report::terminal;
 use crate::runner::temp_repo::{RepoRelPath, TempRepo};
@@ -81,6 +82,13 @@ pub struct RunArgs {
         help = "Write I-vs-A scatter chart to this PNG file"
     )]
     pub chart_out: Utf8PathBuf,
+
+    #[arg(
+        long,
+        default_value = "sdp_flow.png",
+        help = "Write SDP dependency-flow chart to this PNG file"
+    )]
+    pub sdp_out: Utf8PathBuf,
 
     #[arg(
         long,
@@ -351,12 +359,16 @@ fn write_outputs(
     metrics: &crate::graph::metrics::MetricsResult,
     main_sequence: &MainSequenceConfig,
 ) {
-    if let Err(e) = dot::write_dot(graph_idx, args.dot_out.as_path()) {
+    if let Err(e) = dot::write_dot(graph_idx, metrics, args.dot_out.as_path()) {
         eprintln!("error writing dot output: {e}");
     }
 
     if let Err(e) = chart::write_chart(metrics, main_sequence, args.chart_out.as_path()) {
         eprintln!("error writing chart output: {e}");
+    }
+
+    if let Err(e) = sdp_flow::write_sdp_flow(graph_idx, metrics, args.sdp_out.as_path()) {
+        eprintln!("error writing SDP flow chart: {e}");
     }
 
     if let Some(json_path) = &args.json_out {
