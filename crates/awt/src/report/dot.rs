@@ -115,11 +115,14 @@ mod tests {
     }
 
     fn fixture_source_only() -> GraphIndex {
-        GraphIndex::build(&[make_result("src/domain.py", &["src/service.py"])])
+        GraphIndex::build(&[make_result("src/domain.py", &["src/service.py"])], &[])
     }
 
     fn fixture_source_to_test() -> GraphIndex {
-        GraphIndex::build(&[make_result("src/domain.py", &["tests/test_domain.py"])])
+        GraphIndex::build(
+            &[make_result("src/domain.py", &["tests/test_domain.py"])],
+            &[],
+        )
     }
 
     #[test]
@@ -162,7 +165,7 @@ mod tests {
             make_result("src/a.py", &["src/b.py"]),
             make_result("src/b.py", &["src/a.py"]),
         ];
-        let idx = GraphIndex::build(&results);
+        let idx = GraphIndex::build(&results, &[]);
         let dot = render(&idx);
         assert!(dot.contains("lightcoral"));
     }

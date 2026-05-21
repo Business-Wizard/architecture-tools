@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use camino::Utf8PathBuf;
 use petgraph::visit::EdgeRef;
 
-use crate::graph::coupling_graph::{FileRole, GraphIndex};
+use crate::graph::coupling_graph::{FileRole, GraphIndex, resolve_source_module};
 use crate::model::{MutantResult, MutantStatus, OperatorKind};
 
 #[derive(Debug, Default, PartialEq)]
@@ -58,13 +58,17 @@ pub struct ClusteringResult {
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn analyse(idx: &GraphIndex, results: &[MutantResult]) -> ClusteringResult {
+pub fn analyse(
+    idx: &GraphIndex,
+    results: &[MutantResult],
+    known_source_files: &[Utf8PathBuf],
+) -> ClusteringResult {
     // Per-file operator breakdown: file → operator → (distinct source files, distinct test files)
-    type FileSets<'a> = (
-        std::collections::HashSet<&'a Utf8PathBuf>,
-        std::collections::HashSet<&'a Utf8PathBuf>,
+    type FileSets = (
+        std::collections::HashSet<Utf8PathBuf>,
+        std::collections::HashSet<Utf8PathBuf>,
     );
-    let mut operator_breakdown: HashMap<&Utf8PathBuf, HashMap<&OperatorKind, FileSets<'_>>> =
+    let mut operator_breakdown: HashMap<&Utf8PathBuf, HashMap<&OperatorKind, FileSets>> =
         HashMap::new();
     for r in results {
         if r.status != MutantStatus::Breaks || r.external_failures.is_empty() {
@@ -74,11 +78,14 @@ pub fn analyse(idx: &GraphIndex, results: &[MutantResult]) -> ClusteringResult {
         let (src_set, test_set) = entry.entry(&r.candidate.operator).or_default();
         for f in r.affected_files() {
             if FileRole::from_path(f) == FileRole::Test {
-                test_set.insert(f);
+                if let Some(resolved) = resolve_source_module(f, known_source_files) {
+                    src_set.insert(resolved);
+                }
             } else {
-                src_set.insert(f);
+                src_set.insert(f.clone());
             }
         }
+        let _ = test_set; // always empty after resolution; kept for structural symmetry
     }
 
     // Centers of gravity: nodes with highest out-degree (by distinct affected files)
@@ -425,33 +432,31 @@ mod tests {
     }
 
     #[test]
-    fn test_analyse_operator_breakdown_should_split_source_and_test_files() {
-        let idx = make_graph_index(&[
-            ("src/order.py", "src/billing.py"),
-            ("src/order.py", "tests/test_order.py"),
-        ]);
+    fn test_analyse_operator_breakdown_resolves_test_files_to_source_modules() {
+        let idx = make_graph_index(&[("src/order.py", "src/billing.py")]);
         let results = vec![make_mutant_result(
             "src/order.py",
             OperatorKind::AddRequiredParameter,
             MutantStatus::Breaks,
             &["src/billing.py", "tests/test_order.py"],
         )];
-        let clustering = analyse(&idx, &results);
+        let known = vec![
+            Utf8PathBuf::from("src/order.py"),
+            Utf8PathBuf::from("src/billing.py"),
+        ];
+        let clustering = analyse(&idx, &results, &known);
         let center = find_center(&clustering, "src/order.py");
         assert_eq!(
             center
                 .operator_breakdown
                 .get(&OperatorKind::AddRequiredParameter),
-            Some(&OperatorBreakdown { source: 1, test: 1 })
+            Some(&OperatorBreakdown { source: 2, test: 0 })
         );
     }
 
     #[test]
     fn test_analyse_operator_breakdown_should_track_multiple_operators_separately() {
-        let idx = make_graph_index(&[
-            ("src/order.py", "src/billing.py"),
-            ("src/order.py", "tests/test_order.py"),
-        ]);
+        let idx = make_graph_index(&[("src/order.py", "src/billing.py")]);
         let results = vec![
             make_mutant_result(
                 "src/order.py",
@@ -466,7 +471,11 @@ mod tests {
                 &["tests/test_order.py"],
             ),
         ];
-        let clustering = analyse(&idx, &results);
+        let known = vec![
+            Utf8PathBuf::from("src/order.py"),
+            Utf8PathBuf::from("src/billing.py"),
+        ];
+        let clustering = analyse(&idx, &results, &known);
         let center = find_center(&clustering, "src/order.py");
         assert_eq!(
             center
@@ -476,7 +485,7 @@ mod tests {
         );
         assert_eq!(
             center.operator_breakdown.get(&OperatorKind::RemoveImport),
-            Some(&OperatorBreakdown { source: 0, test: 1 })
+            Some(&OperatorBreakdown { source: 1, test: 0 })
         );
     }
 
@@ -489,7 +498,7 @@ mod tests {
             MutantStatus::Survives,
             &["src/billing.py"],
         )];
-        let clustering = analyse(&idx, &results);
+        let clustering = analyse(&idx, &results, &[]);
         let center = find_center(&clustering, "src/order.py");
         assert!(center.operator_breakdown.is_empty());
     }
@@ -511,7 +520,7 @@ mod tests {
                 &["src/billing.py"],
             ),
         ];
-        let clustering = analyse(&idx, &results);
+        let clustering = analyse(&idx, &results, &[]);
         let center = find_center(&clustering, "src/order.py");
         assert_eq!(
             center
@@ -524,14 +533,14 @@ mod tests {
     #[test]
     fn test_analyse_should_flag_different_package_edge_as_unexpected() {
         let idx = make_graph_index(&[("src/a/order.py", "lib/b/report.py")]);
-        let result = analyse(&idx, &[]);
+        let result = analyse(&idx, &[], &[]);
         assert_eq!(result.unexpected.len(), 1);
     }
 
     #[test]
     fn test_analyse_should_not_flag_same_package_edge_as_unexpected() {
         let idx = make_graph_index(&[("src/a/order.py", "src/b/invoice.py")]);
-        let result = analyse(&idx, &[]);
+        let result = analyse(&idx, &[], &[]);
         assert!(result.unexpected.is_empty());
     }
 }

@@ -99,6 +99,7 @@ pub fn run() {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_command(args: &RunArgs) {
     let repo_root = match repo::resolve(args.repo.as_ref()) {
         Ok(p) => p,
@@ -152,6 +153,15 @@ fn run_command(args: &RunArgs) {
         return;
     }
 
+    let source_files: Vec<Utf8PathBuf> = {
+        let mut seen = std::collections::HashSet::new();
+        discovery
+            .candidates
+            .iter()
+            .map(|c| c.file.clone())
+            .filter(|f| seen.insert(f.clone()))
+            .collect()
+    };
     let candidates: Vec<Candidate> = discovery
         .candidates
         .into_iter()
@@ -180,7 +190,7 @@ fn run_command(args: &RunArgs) {
 
     pb.finish_and_clear();
 
-    let graph_idx = GraphIndex::build(&results);
+    let graph_idx = GraphIndex::build(&results, &source_files);
     let include_dirs: Vec<Utf8PathBuf> = cfg
         .include_dirs
         .iter()
@@ -188,7 +198,7 @@ fn run_command(args: &RunArgs) {
         .collect();
     let abstractness_map = abstractness::compute(&repo_root, &include_dirs);
     let metrics_result = metrics::compute(&graph_idx, &abstractness_map);
-    let cluster_result = graph_analysis::analyse(&graph_idx, &results);
+    let cluster_result = graph_analysis::analyse(&graph_idx, &results, &source_files);
     let fitness_report = fitness::evaluate_all(&graph_idx, &metrics_result, &cfg.fitness);
     terminal::print_report(
         &baseline,
