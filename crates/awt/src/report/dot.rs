@@ -45,7 +45,7 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
 
     let mut out = String::new();
     writeln!(out, "digraph coupling {{").unwrap();
-    writeln!(out, "    rankdir=RL;").unwrap();
+    writeln!(out, "    rankdir=LR;").unwrap();
 
     for &n in &source_nodes {
         let node = &idx.graph[n];

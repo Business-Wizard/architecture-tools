@@ -28,10 +28,11 @@ pub struct Depender(pub Instability);
 #[derive(Debug, Clone, Copy)]
 pub struct Dependency(pub Instability);
 
-/// Returns true when the depender is more unstable than its dependency — an SDP violation.
-/// SDP: a module should not be more unstable than the modules it depends upon.
+/// Returns true when the dependency is more unstable than the depender — an SDP violation.
+/// SDP: you should only depend on things more stable (lower I) than yourself.
+/// Violation: dependency.I > depender.I + ε (depending on something more unstable than you).
 pub fn violates_sdp(dependency: Dependency, depender: Depender) -> bool {
-    depender.0.as_f64() > dependency.0.as_f64() + INSTABILITY_EPSILON
+    dependency.0.as_f64() > depender.0.as_f64() + INSTABILITY_EPSILON
 }
 
 #[derive(Debug)]

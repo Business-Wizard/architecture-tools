@@ -429,8 +429,10 @@ mod tests {
 
     #[test]
     fn test_sdp_unstable_dependency_should_produce_violation() {
+        // Edge a→b: b depends on a. a.I=0.8 (unstable), b.I=0.2 (stable).
+        // A stable module (b) depending on an unstable one (a) violates SDP.
         let idx = make_graph(&[("src/a.py", "src/b.py")]);
-        let metrics = make_metrics(&[("src/a.py", 0.2, 0.0, 0.8), ("src/b.py", 0.8, 0.0, 0.2)]);
+        let metrics = make_metrics(&[("src/a.py", 0.8, 0.0, 0.2), ("src/b.py", 0.2, 0.0, 0.8)]);
         let config = sdp_enabled();
         let actual = sdp_stable_dependencies(&idx, &metrics, &config);
         assert_eq!(actual.len(), 1);
@@ -439,8 +441,10 @@ mod tests {
 
     #[test]
     fn test_sdp_stable_dependency_should_produce_no_violation() {
+        // Edge a→b: b depends on a. a.I=0.2 (stable), b.I=0.8 (unstable).
+        // An unstable module (b) depending on a stable one (a) is healthy SDP.
         let idx = make_graph(&[("src/a.py", "src/b.py")]);
-        let metrics = make_metrics(&[("src/a.py", 0.8, 0.0, 0.2), ("src/b.py", 0.2, 0.0, 0.8)]);
+        let metrics = make_metrics(&[("src/a.py", 0.2, 0.0, 0.8), ("src/b.py", 0.8, 0.0, 0.2)]);
         let config = sdp_enabled();
         let actual = sdp_stable_dependencies(&idx, &metrics, &config);
         assert_eq!(actual.len(), 0);

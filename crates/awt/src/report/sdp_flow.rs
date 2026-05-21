@@ -28,13 +28,14 @@ const COLOUR_HEALTHY: RGBColor = RGBColor(30, 160, 70);
 const COLOUR_VIOLATION: RGBColor = RGBColor(200, 50, 40);
 const COLOUR_NEUTRAL: RGBColor = RGBColor(130, 130, 130);
 
-/// Encapsulates axis orientation: unstable (I=1) left, stable (I=0) right.
+/// Encapsulates axis orientation: stable (I=0) left, unstable (I=1) right.
+/// Arrows flow left→right, from depender toward dependency (stable on left).
 struct StabilityAxis;
 
 impl StabilityAxis {
     fn x_pos(i: Instability) -> i32 {
         #[allow(clippy::cast_possible_truncation)]
-        let offset = ((1.0 - i.as_f64()) * f64::from(PLOT_WIDTH)) as i32;
+        let offset = (i.as_f64() * f64::from(PLOT_WIDTH)) as i32;
         i32::try_from(MARGIN_LEFT).unwrap_or(0) + offset
     }
 }
@@ -72,9 +73,9 @@ impl SdpEdge {
     fn colour(&self) -> RGBColor {
         let i_dep = self.dependency.0.as_f64();
         let i_per = self.depender.0.as_f64();
-        if i_per - i_dep > INSTABILITY_EPSILON {
+        if i_dep - i_per > INSTABILITY_EPSILON {
             COLOUR_VIOLATION
-        } else if i_dep - i_per > INSTABILITY_EPSILON {
+        } else if i_per - i_dep > INSTABILITY_EPSILON {
             COLOUR_HEALTHY
         } else {
             COLOUR_NEUTRAL
@@ -194,7 +195,7 @@ fn render_sdp_flow(edges: &[SdpEdge], path: &Utf8Path) -> io::Result<()> {
         .into_font()
         .color(&plotters::style::BLACK);
     root.draw(&Text::new(
-        "SDP Dependency Flow  (I_src \u{2192} I_dst)",
+        "SDP Dependency Flow  (depender \u{2192} dependency)",
         (i32::try_from(CHART_WIDTH / 2).unwrap_or(0), 12),
         title_style.pos(Pos::new(HPos::Center, VPos::Top)),
     ))
@@ -234,7 +235,7 @@ fn render_sdp_flow(edges: &[SdpEdge], path: &Utf8Path) -> io::Result<()> {
         .into_font()
         .color(&plotters::style::BLACK);
     root.draw(&Text::new(
-        "Instability (I)   unstable \u{2190} stable",
+        "Instability (I)   stable \u{2192} unstable",
         (i32::try_from(CHART_WIDTH / 2).unwrap_or(0), axis_y + 20),
         axis_label_style.pos(Pos::new(HPos::Center, VPos::Top)),
     ))
