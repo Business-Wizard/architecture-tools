@@ -28,7 +28,7 @@ const COLOUR_HEALTHY: RGBColor = RGBColor(30, 160, 70);
 const COLOUR_VIOLATION: RGBColor = RGBColor(200, 50, 40);
 const COLOUR_NEUTRAL: RGBColor = RGBColor(130, 130, 130);
 const COLOUR_STEEP: RGBColor = RGBColor(220, 160, 0);
-const STEEP_JUMP_THRESHOLD: f64 = 0.5;
+const STEEP_JUMP_THRESHOLD: f64 = 0.8;
 
 /// Encapsulates axis orientation: stable (I=0) left, unstable (I=1) right.
 /// Arrows flow left→right, from depender toward dependency (stable on left).
