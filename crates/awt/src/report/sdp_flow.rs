@@ -13,15 +13,15 @@ use crate::graph::metrics::{
     Dependency, Depender, INSTABILITY_EPSILON, Instability, MetricsResult, violates_sdp,
 };
 
-const CHART_WIDTH: u32 = 900;
-const ROW_HEIGHT: u32 = 28;
-const MARGIN_LEFT: u32 = 180;
-const MARGIN_RIGHT: u32 = 180;
-const MARGIN_TOP: u32 = 60;
-const MARGIN_BOTTOM: u32 = 50;
+const CHART_WIDTH: u32 = 1800;
+const ROW_HEIGHT: u32 = 56;
+const MARGIN_LEFT: u32 = 360;
+const MARGIN_RIGHT: u32 = 360;
+const MARGIN_TOP: u32 = 120;
+const MARGIN_BOTTOM: u32 = 100;
 const PLOT_WIDTH: u32 = CHART_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
-const ARROW_HEAD_LEN: i32 = 10;
-const ARROW_HEAD_WIDTH: i32 = 5;
+const ARROW_HEAD_LEN: i32 = 20;
+const ARROW_HEAD_WIDTH: i32 = 10;
 const MAX_ROWS: usize = 40;
 
 const COLOUR_HEALTHY: RGBColor = RGBColor(30, 160, 70);
@@ -185,7 +185,7 @@ fn draw_arrow(
     // Shaft
     area.draw(&PathElement::new(
         vec![(x_src, row_y), (x_dst, row_y)],
-        colour.stroke_width(2),
+        colour.stroke_width(4),
     ))
     .map_err(|e| io::Error::other(e.to_string()))?;
 
@@ -197,7 +197,7 @@ fn draw_arrow(
     area.draw(&Polygon::new(vec![tip, tail_a, tail_b], colour.filled()))
         .map_err(|e| io::Error::other(e.to_string()))?;
 
-    let label_style = ("sans-serif", 11).into_font().color(&colour);
+    let label_style = ("sans-serif", 22).into_font().color(&colour);
 
     // Labels sit just outside the arrow's start and end points.
     // Use outward-facing alignment so text never overlaps the shaft.
@@ -208,14 +208,14 @@ fn draw_arrow(
     };
     area.draw(&Text::new(
         edge.depender_label.clone(),
-        (x_src - if x_src <= x_dst { 6 } else { -6 }, row_y - 6),
+        (x_src - if x_src <= x_dst { 12 } else { -12 }, row_y - 12),
         label_style.clone().pos(Pos::new(src_align, VPos::Top)),
     ))
     .map_err(|e| io::Error::other(e.to_string()))?;
 
     area.draw(&Text::new(
         edge.dependency_label.clone(),
-        (x_dst + if x_src <= x_dst { 6 } else { -6 }, row_y - 6),
+        (x_dst + if x_src <= x_dst { 12 } else { -12 }, row_y - 12),
         label_style.pos(Pos::new(dst_align, VPos::Top)),
     ))
     .map_err(|e| io::Error::other(e.to_string()))?;
@@ -233,12 +233,12 @@ fn render_sdp_flow(edges: &[SdpEdge], path: &Utf8Path) -> io::Result<()> {
         .map_err(|e| io::Error::other(e.to_string()))?;
 
     // Title
-    let title_style = ("sans-serif", 16)
+    let title_style = ("sans-serif", 32)
         .into_font()
         .color(&plotters::style::BLACK);
     root.draw(&Text::new(
         "SDP Dependency Flow  (depender \u{2192} dependency)",
-        (i32::try_from(CHART_WIDTH / 2).unwrap_or(0), 12),
+        (i32::try_from(CHART_WIDTH / 2).unwrap_or(0), 24),
         title_style.pos(Pos::new(HPos::Center, VPos::Top)),
     ))
     .map_err(|e| io::Error::other(e.to_string()))?;
@@ -254,31 +254,31 @@ fn render_sdp_flow(edges: &[SdpEdge], path: &Utf8Path) -> io::Result<()> {
     .map_err(|e| io::Error::other(e.to_string()))?;
 
     // X-axis ticks and labels
-    let tick_style = ("sans-serif", 10)
+    let tick_style = ("sans-serif", 20)
         .into_font()
         .color(&plotters::style::BLACK);
     for &tick in &[0.0_f64, 0.25, 0.5, 0.75, 1.0] {
         let tx = StabilityAxis::x_pos(Instability::new(tick));
         root.draw(&PathElement::new(
-            vec![(tx, axis_y), (tx, axis_y + 4)],
-            plotters::style::BLACK.stroke_width(1),
+            vec![(tx, axis_y), (tx, axis_y + 8)],
+            plotters::style::BLACK.stroke_width(2),
         ))
         .map_err(|e| io::Error::other(e.to_string()))?;
         root.draw(&Text::new(
             format!("{tick:.2}"),
-            (tx, axis_y + 6),
+            (tx, axis_y + 12),
             tick_style.clone().pos(Pos::new(HPos::Center, VPos::Top)),
         ))
         .map_err(|e| io::Error::other(e.to_string()))?;
     }
 
     // Axis label
-    let axis_label_style = ("sans-serif", 12)
+    let axis_label_style = ("sans-serif", 24)
         .into_font()
         .color(&plotters::style::BLACK);
     root.draw(&Text::new(
         "Instability (I)   stable \u{2192} unstable",
-        (i32::try_from(CHART_WIDTH / 2).unwrap_or(0), axis_y + 20),
+        (i32::try_from(CHART_WIDTH / 2).unwrap_or(0), axis_y + 40),
         axis_label_style.pos(Pos::new(HPos::Center, VPos::Top)),
     ))
     .map_err(|e| io::Error::other(e.to_string()))?;
@@ -294,7 +294,7 @@ fn render_sdp_flow(edges: &[SdpEdge], path: &Utf8Path) -> io::Result<()> {
 
     // Overflow note
     if edges.len() > MAX_ROWS {
-        let note_style = ("sans-serif", 10)
+        let note_style = ("sans-serif", 20)
             .into_font()
             .color(&plotters::style::BLACK);
         let max_rows_u32 = u32::try_from(MAX_ROWS).unwrap_or(u32::MAX);
