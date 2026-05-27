@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
@@ -275,7 +276,8 @@ fn run_command(args: &RunArgs) {
 
     let pb = Arc::new(ProgressBar::new(candidates.len() as u64));
     pb.set_style(
-        ProgressStyle::with_template("[{pos}/{len}] {percent}%").expect("valid progress template"),
+        ProgressStyle::with_template("[{pos}/{len}] {percent}%  {msg}")
+            .expect("valid progress template"),
     );
     pb.println(format!(
         "\nRunning {} mutants ({} jobs)...",
@@ -283,15 +285,19 @@ fn run_command(args: &RunArgs) {
         cfg.jobs
     ));
 
-    let results = rt.block_on(run_mutants_async(
-        candidates,
-        &repo_root,
-        cfg.timeout_secs,
-        cfg.keep_temp_on_failure,
+    let eta = Arc::new(Mutex::new(EtaTracker::new(
+        pb.length().unwrap_or(0),
         cfg.jobs,
-        cfg.include_dirs.clone(),
-        Arc::clone(&pb),
-    ));
+    )));
+    let run_cfg = MutantRunConfig {
+        timeout_secs: cfg.timeout_secs,
+        keep_on_fail: cfg.keep_temp_on_failure,
+        jobs: cfg.jobs,
+        include_dirs: cfg.include_dirs.clone(),
+        pb: Arc::clone(&pb),
+        eta,
+    };
+    let results = rt.block_on(run_mutants_async(candidates, &repo_root, run_cfg));
 
     pb.finish_and_clear();
 
@@ -328,6 +334,79 @@ fn run_command(args: &RunArgs) {
     }
 }
 
+struct MutantRunConfig {
+    timeout_secs: u64,
+    keep_on_fail: bool,
+    jobs: usize,
+    include_dirs: Vec<String>,
+    pb: Arc<ProgressBar>,
+    eta: Arc<Mutex<EtaTracker>>,
+}
+
+struct EtaTracker {
+    samples: Vec<f64>,
+    total: u64,
+    jobs: usize,
+}
+
+impl EtaTracker {
+    fn new(total: u64, jobs: usize) -> Self {
+        Self {
+            samples: Vec::new(),
+            total,
+            jobs,
+        }
+    }
+
+    fn record(&mut self, secs: f64) {
+        self.samples.push(secs);
+    }
+
+    fn eta_string(&self) -> String {
+        let n = self.samples.len();
+        let completed = n as u64;
+        let remaining = self.total.saturating_sub(completed);
+
+        if remaining == 0 {
+            return String::new();
+        }
+
+        if n < 2 {
+            return "ETA ~...".to_string();
+        }
+
+        #[allow(clippy::cast_precision_loss)]
+        let n_f = n as f64;
+        #[allow(clippy::cast_precision_loss)]
+        let remaining_f = remaining as f64;
+
+        let mean = self.samples.iter().sum::<f64>() / n_f;
+        // Bessel's correction (n-1): unbiased sample variance, especially important for small n
+        let variance = self.samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / (n_f - 1.0);
+        let std_dev = variance.sqrt();
+
+        // Divide by parallel jobs: N workers drain the queue N times faster
+        #[allow(clippy::cast_precision_loss)]
+        let jobs_f = self.jobs as f64;
+        let eta_secs = mean * remaining_f / jobs_f;
+
+        // 70% CI: z for 85th percentile of standard normal ≈ 1.036
+        let ci_half = 1.036_f64 * std_dev * remaining_f.sqrt() / jobs_f;
+
+        format!("ETA ~{} ±{}", fmt_duration(eta_secs), fmt_duration(ci_half))
+    }
+}
+
+fn fmt_duration(secs: f64) -> String {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let secs = secs.round() as u64;
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    }
+}
+
 async fn run_baseline_async(verifiers: &VerifierSet, repo: &std::path::Path) -> BaselineResult {
     let basedpyright = verifiers
         .run_basedpyright(repo)
@@ -346,14 +425,10 @@ async fn run_baseline_async(verifiers: &VerifierSet, repo: &std::path::Path) -> 
 async fn run_mutants_async(
     candidates: Vec<Candidate>,
     repo_root: &std::path::Path,
-    timeout_secs: u64,
-    keep_on_fail: bool,
-    jobs: usize,
-    include_dirs: Vec<String>,
-    pb: Arc<ProgressBar>,
+    cfg: MutantRunConfig,
 ) -> Vec<MutantResult> {
-    let sem = Arc::new(Semaphore::new(jobs));
-    let include_dirs = Arc::new(include_dirs);
+    let sem = Arc::new(Semaphore::new(cfg.jobs));
+    let include_dirs = Arc::new(cfg.include_dirs);
     let mut join_set: JoinSet<MutantResult> = JoinSet::new();
 
     for candidate in candidates {
@@ -362,13 +437,24 @@ async fn run_mutants_async(
             .await
             .expect("semaphore closed");
         let repo = repo_root.to_path_buf();
-        let pb = Arc::clone(&pb);
+        let pb = Arc::clone(&cfg.pb);
+        let eta = Arc::clone(&cfg.eta);
         let dirs = Arc::clone(&include_dirs);
+        let timeout_secs = cfg.timeout_secs;
+        let keep_on_fail = cfg.keep_on_fail;
 
         join_set.spawn(async move {
-            let _permit = permit; // released when this task completes
+            let _permit = permit;
+            let t0 = Instant::now();
             let result =
                 run_mutant_async(candidate, &repo, timeout_secs, keep_on_fail, &dirs).await;
+            let elapsed = t0.elapsed().as_secs_f64();
+            let msg = {
+                let mut tracker = eta.lock().expect("eta mutex poisoned");
+                tracker.record(elapsed);
+                tracker.eta_string()
+            };
+            pb.set_message(msg);
             pb.inc(1);
             result
         });
