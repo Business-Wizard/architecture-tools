@@ -1,5 +1,4 @@
 ideas:
-- ETA, based on measured Throughput or Cycle Time. 70% confidence interval should do fine
 - pivot to object level analysis. faster, no tests/types, object level granularity
 - Abstractness metric that accounts for semantic abstraction objects. eg Entities, Value Objects, concrete method count.
   - interfaces + semantic abstractions (domain) / objects_count + concrete_methods_count
@@ -29,3 +28,4 @@ tech debt:
 - test case `test_given_composite_usecase_should_measure_abstractness_above_zero`
 
 done:
+- ETA, based on measured Throughput or Cycle Time. 70% confidence interval should do fine
