@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use camino::Utf8PathBuf;
 use serde::Deserialize;
 
+use crate::failures::common::relativize;
 use crate::model::{
     FailureCategory, FailureEvent, FailureScope, MutantId, RunnerError, VerifierKind,
 };
@@ -50,9 +50,8 @@ pub async fn run_and_parse(
     )
     .await?;
 
-    let Ok(parsed) = serde_json::from_str::<JsonOutput>(&out.stdout) else {
-        return Ok(vec![]);
-    };
+    let parsed = serde_json::from_str::<JsonOutput>(&out.stdout)
+        .map_err(|e| RunnerError::ParseError(format!("basedpyright: {e}")))?;
 
     let events = parsed
         .diagnostics
@@ -97,24 +96,10 @@ fn classify(message: &str, rule: Option<&str>) -> (FailureCategory, Option<Strin
     (category, rule.map(String::from), message.to_string())
 }
 
-fn relativize(filename: &str, repo_root: &Path) -> Utf8PathBuf {
-    let p = std::path::Path::new(filename);
-    if let Ok(rel) = p.strip_prefix(repo_root) {
-        return Utf8PathBuf::try_from(rel.to_path_buf())
-            .unwrap_or_else(|_| Utf8PathBuf::from(filename));
-    }
-    // Retry after resolving symlinks (e.g. macOS /tmp → /private/tmp)
-    if let (Ok(canon_p), Ok(canon_root)) = (p.canonicalize(), repo_root.canonicalize())
-        && let Ok(rel) = canon_p.strip_prefix(&canon_root)
-    {
-        return Utf8PathBuf::try_from(rel.to_path_buf())
-            .unwrap_or_else(|_| Utf8PathBuf::from(filename));
-    }
-    Utf8PathBuf::from(filename)
-}
-
 #[cfg(test)]
 mod tests {
+    use camino::Utf8PathBuf;
+
     use super::*;
 
     fn make_json(file: &str, severity: &str, rule: Option<&str>) -> String {
@@ -130,7 +115,7 @@ mod tests {
         let json = make_json("/repo/src/api/routes.py", "error", Some("reportCallIssue"));
         let parsed: JsonOutput = serde_json::from_str(&json).unwrap();
         let diag = &parsed.diagnostics[0];
-        let rel = super::relativize(&diag.file, std::path::Path::new("/repo"));
+        let rel = relativize(&diag.file, std::path::Path::new("/repo"));
         assert_eq!(rel, Utf8PathBuf::from("src/api/routes.py"));
         let scope = if id.0.starts_with(rel.as_str()) {
             FailureScope::Local
@@ -187,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_relativize_path_not_under_root_should_return_original() {
-        let actual = super::relativize("/other/path/file.py", std::path::Path::new("/repo"));
+        let actual = relativize("/other/path/file.py", std::path::Path::new("/repo"));
         let expected = Utf8PathBuf::from("/other/path/file.py");
         assert_eq!(actual, expected);
     }

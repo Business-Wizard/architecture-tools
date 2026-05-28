@@ -220,6 +220,8 @@ pub enum RunnerError {
     Io(#[from] std::io::Error),
     #[error("temp dir error: {0}")]
     TempDir(String),
+    #[error("failed to parse verifier output: {0}")]
+    ParseError(String),
 }
 
 // ── Fitness functions ─────────────────────────────────────────────────────────

@@ -104,7 +104,8 @@ fn extract_function(node: Node<'_>, source: &[u8], in_class: bool) -> Option<Fun
     let name = name_node.utf8_text(source).ok()?.to_string();
 
     let params_node = node.child_by_field_name("parameters")?;
-    let line = u32::try_from(node.start_position().row).unwrap_or(u32::MAX);
+    let line = u32::try_from(node.start_position().row)
+        .unwrap_or_else(|_| unreachable!("tree-sitter row exceeds u32::MAX"));
     let params_byte_start = params_node.start_byte();
     let params_byte_end = params_node.end_byte();
 
@@ -279,7 +280,8 @@ fn collect_imports(node: Node<'_>, source: &[u8], out: &mut Vec<ImportInfo>) {
             let text = node.utf8_text(source).unwrap_or("").to_string();
             out.push(ImportInfo {
                 module_path: text,
-                line: u32::try_from(node.start_position().row).unwrap_or(u32::MAX),
+                line: u32::try_from(node.start_position().row)
+                    .unwrap_or_else(|_| unreachable!("tree-sitter row exceeds u32::MAX")),
                 byte_start: node.start_byte(),
                 byte_end: node.end_byte(),
             });

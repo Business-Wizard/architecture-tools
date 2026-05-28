@@ -3,6 +3,7 @@ use std::path::Path;
 use camino::Utf8PathBuf;
 use serde::Deserialize;
 
+use crate::failures::common::relativize;
 use crate::model::RunnerError;
 use crate::model::{FailureCategory, FailureEvent, FailureScope, MutantId, VerifierKind};
 use crate::runner::command;
@@ -32,7 +33,8 @@ pub fn run_and_parse(
         return Ok(vec![]);
     }
 
-    let diagnostics: Vec<RuffDiagnostic> = serde_json::from_str(&out.stdout).unwrap_or_default();
+    let diagnostics: Vec<RuffDiagnostic> = serde_json::from_str(&out.stdout)
+        .map_err(|e| RunnerError::ParseError(format!("ruff: {e}")))?;
 
     let events = diagnostics
         .into_iter()
@@ -58,22 +60,6 @@ pub fn run_and_parse(
         .collect();
 
     Ok(events)
-}
-
-fn relativize(filename: &str, repo_root: &Path) -> Utf8PathBuf {
-    let p = std::path::Path::new(filename);
-    if let Ok(rel) = p.strip_prefix(repo_root) {
-        return Utf8PathBuf::try_from(rel.to_path_buf())
-            .unwrap_or_else(|_| Utf8PathBuf::from(filename));
-    }
-    // Retry after resolving symlinks (e.g. macOS /tmp → /private/tmp)
-    if let (Ok(canon_p), Ok(canon_root)) = (p.canonicalize(), repo_root.canonicalize())
-        && let Ok(rel) = canon_p.strip_prefix(&canon_root)
-    {
-        return Utf8PathBuf::try_from(rel.to_path_buf())
-            .unwrap_or_else(|_| Utf8PathBuf::from(filename));
-    }
-    Utf8PathBuf::from(filename)
 }
 
 #[cfg(test)]
@@ -106,14 +92,14 @@ mod tests {
 
     #[test]
     fn test_relativize_with_matching_prefix_should_strip_root() {
-        let actual = super::relativize("/repo/src/foo.py", std::path::Path::new("/repo"));
+        let actual = relativize("/repo/src/foo.py", std::path::Path::new("/repo"));
         let expected = Utf8PathBuf::from("src/foo.py");
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn test_relativize_with_non_matching_prefix_should_return_original() {
-        let actual = super::relativize("/other/src/foo.py", std::path::Path::new("/repo"));
+        let actual = relativize("/other/src/foo.py", std::path::Path::new("/repo"));
         let expected = Utf8PathBuf::from("/other/src/foo.py");
         assert_eq!(actual, expected);
     }
