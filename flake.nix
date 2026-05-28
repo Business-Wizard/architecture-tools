@@ -23,6 +23,7 @@
         loctree = pkgs.callPackage ./nix/loctree.nix {};
         ai-coach = pkgs.callPackage ./nix/ai-coach.nix {};
         sentrux = pkgs.callPackage ./nix/sentrux.nix {};
+        rtk = pkgs.callPackage ./nix/rtk.nix {};
       in
       {
         packages.ai-coach = ai-coach;
@@ -40,6 +41,7 @@
             beads
             dolt
             sentrux
+            rtk
           ];
         };
       }
