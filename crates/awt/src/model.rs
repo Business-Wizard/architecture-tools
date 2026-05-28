@@ -87,7 +87,6 @@ pub struct Candidate {
 pub enum VerifierKind {
     Basedpyright,
     Pytest,
-    Ruff,
 }
 
 impl std::fmt::Display for VerifierKind {
@@ -95,7 +94,6 @@ impl std::fmt::Display for VerifierKind {
         let s = match self {
             Self::Basedpyright => "basedpyright",
             Self::Pytest => "pytest",
-            Self::Ruff => "ruff",
         };
         f.write_str(s)
     }
@@ -106,7 +104,6 @@ pub enum FailureCategory {
     Syntax,
     Type,
     Import,
-    Lint,
     TestAssertion,
     TestCollection,
     Runtime,

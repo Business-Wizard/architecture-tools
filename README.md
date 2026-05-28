@@ -148,8 +148,7 @@ remove_module = false
 max_mutations = 100
 ```
 
-The tool runs all three verifiers by default:
-- **ruff**: Fast linting and style checks
+The tool runs two verifiers by default:
 - **basedpyright**: Type checking (requires Python 3.11+ stubs)
 - **pytest**: Actual test execution (requires passing tests)
 
@@ -171,7 +170,7 @@ cargo build -p awt
 # 1. Load configuration from awt.toml
 # 2. Scan Python files with tree-sitter
 # 3. Generate mutation candidates
-# 4. Run baseline verifiers (ruff, basedpyright, pytest)
+# 4. Run baseline verifiers (basedpyright, pytest)
 # 5. Apply each mutation to a temp directory and test
 # 6. Generate a terminal report showing coupling clusters
 ```

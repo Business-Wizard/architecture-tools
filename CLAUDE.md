@@ -85,12 +85,12 @@ src/
   runner/
     temp_repo.rs   # copy repo → tempfile dir, apply mutation
     command.rs     # std::process::Command wrappers
-    verifier.rs    # run ruff / basedpyright / pytest, parse stdout
+    verifier.rs    # run basedpyright / pytest, parse stdout
 
   failures/
-    ruff.rs        # parse ruff JSON output
     basedpyright.rs
     pytest.rs
+    common.rs      # shared path helpers
 
   graph/
     coupling_graph.rs  # petgraph model
@@ -112,7 +112,6 @@ src/
 | Python style | Typed Python |
 | Type checker | basedpyright |
 | Test runner | pytest |
-| Linter | ruff |
 | Package runner | uv |
 | Execution model | Ephemeral temp directories |
 | UI | Terminal report only |
@@ -150,7 +149,7 @@ The project follows the MVP pattern from the global `CLAUDE.md`:
 ### Pipeline (from `PROMPT.md` §8)
 
 `awt run` executes in order:
-1. Load config → 2. Scan Python files → 3. Parse with tree-sitter → 4. Discover candidates → 5. Rank/select → 6. **Baseline verifier run** (abort if failing) → 7. For each mutant: copy repo, apply mutation, run ruff + basedpyright + pytest, parse failures → 8. Build coupling graph → 9. Cluster → 10. Print terminal report → 11. Optionally emit JSON.
+1. Load config → 2. Scan Python files → 3. Parse with tree-sitter → 4. Discover candidates → 5. Rank/select → 6. **Baseline verifier run** (abort if failing) → 7. For each mutant: copy repo, apply mutation, run basedpyright + pytest, parse failures → 8. Build coupling graph → 9. Cluster → 10. Print terminal report → 11. Optionally emit JSON.
 
 Baseline must pass before mutation runs begin.
 
