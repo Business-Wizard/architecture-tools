@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/awt"]
+members = ["crates/awt", "crates/architecture-core"]
 resolver = "2"
 
 [workspace.metadata]
