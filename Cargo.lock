@@ -91,6 +91,7 @@ name = "awt"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "architecture-core",
  "camino",
  "clap",
  "colored",

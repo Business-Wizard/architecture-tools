@@ -103,9 +103,9 @@ pub struct RunArgs {
 
     #[arg(
         long,
-        help = "Build coupling graph from static import analysis (skips mutation execution)"
+        help = "Enable mutation testing (slower; builds coupling graph from live mutations)"
     )]
-    pub fast: bool,
+    pub mutate: bool,
 }
 
 pub fn run() {
@@ -115,7 +115,7 @@ pub fn run() {
     }
 }
 
-fn run_fast_command(args: &RunArgs) {
+fn run_static_command(args: &RunArgs) {
     let repo_root = match repo::resolve(args.repo.as_ref()) {
         Ok(p) => p,
         Err(e) => {
@@ -156,7 +156,7 @@ fn run_fast_command(args: &RunArgs) {
     };
 
     println!(
-        "\n[fast] Building coupling graph from static import analysis ({} files)...",
+        "\nBuilding coupling graph from static import analysis ({} files)...",
         source_files.len()
     );
 
@@ -177,7 +177,7 @@ fn run_fast_command(args: &RunArgs) {
         pytest: VerifierStatus::Pass,
     };
 
-    println!("[fast] Coupling graph built from static import analysis — no mutation data.\n");
+    println!("Coupling graph built from static import analysis — no mutation data.\n");
 
     terminal::print_report(
         &baseline,
@@ -186,6 +186,10 @@ fn run_fast_command(args: &RunArgs) {
         &metrics_result,
         &fitness_report,
     );
+
+    let arch_graph =
+        crate::graph::architecture_builder::build_architecture_graph(&source_files, &repo_root);
+    crate::report::architecture_report::print_architecture_report(&arch_graph);
 
     let report = RunReport::build(&baseline, empty_results, &cluster_result);
 
@@ -204,8 +208,8 @@ fn run_fast_command(args: &RunArgs) {
 
 #[allow(clippy::too_many_lines)]
 fn run_command(args: &RunArgs) {
-    if args.fast {
-        return run_fast_command(args);
+    if !args.mutate {
+        return run_static_command(args);
     }
     let repo_root = match repo::resolve(args.repo.as_ref()) {
         Ok(p) => p,
