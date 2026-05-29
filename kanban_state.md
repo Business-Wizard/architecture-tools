@@ -24,8 +24,8 @@ user feedback:
 - add CI outcomes or Change Failure Rate? to build ROI for improving architecture of modules or objects.
 
 tech debt:
-- rm mod.rs, old convention
 - test case `test_given_composite_usecase_should_measure_abstractness_above_zero`
 
 done:
+- rm mod.rs, old convention
 - ETA, based on measured Throughput or Cycle Time. 70% confidence interval should do fine
