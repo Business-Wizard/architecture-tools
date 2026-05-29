@@ -171,16 +171,15 @@ fn find_classes_with_names(parsed: &ParsedFile) -> Vec<ClassWithName> {
 }
 
 fn collect_named_classes(node: tree_sitter::Node<'_>, source: &[u8], out: &mut Vec<ClassWithName>) {
-    if node.kind() == "class_definition" {
-        if let Some(name_node) = node.child_by_field_name("name") {
-            if let Ok(name) = name_node.utf8_text(source) {
-                let kind = classify_class_kind(node, source);
-                out.push(ClassWithName {
-                    name: name.to_string(),
-                    kind,
-                });
-            }
-        }
+    if node.kind() == "class_definition"
+        && let Some(name_node) = node.child_by_field_name("name")
+        && let Ok(name) = name_node.utf8_text(source)
+    {
+        let kind = classify_class_kind(node, source);
+        out.push(ClassWithName {
+            name: name.to_string(),
+            kind,
+        });
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -198,7 +197,11 @@ fn classify_class_kind(node: tree_sitter::Node<'_>, source: &[u8]) -> ClassKind 
                 if text == "Protocol" || text.ends_with(".Protocol") {
                     return ClassKind::Protocol;
                 }
-                if text == "ABC" || text.ends_with(".ABC") {
+                if text == "ABC"
+                    || std::path::Path::new(text)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("ABC"))
+                {
                     return ClassKind::Abstract;
                 }
             }
@@ -274,6 +277,6 @@ mod tests {
         let f = write_file(dir.path(), "my_module.py", "");
         let graph = build_architecture_graph(&[f], dir.path());
         let names: Vec<_> = graph.modules.values().map(|m| m.name.0.as_str()).collect();
-        assert!(names.iter().any(|n| *n == "my_module"));
+        assert!(names.contains(&"my_module"));
     }
 }
