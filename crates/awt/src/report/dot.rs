@@ -45,7 +45,7 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
 
     let mut out = String::new();
     writeln!(out, "digraph coupling {{").unwrap();
-    writeln!(out, "    rankdir=LR;").unwrap();
+    writeln!(out, "    rankdir=RL;").unwrap();
 
     for &n in &source_nodes {
         let node = &idx.graph[n];
@@ -69,8 +69,8 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
         writeln!(
             out,
             "    {} -> {} [label=\"{count}\" penwidth={pw:.2}];",
-            src.index(),
-            dst.index()
+            dst.index(),
+            src.index()
         )
         .unwrap();
     }
