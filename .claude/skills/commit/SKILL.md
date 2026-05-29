@@ -33,7 +33,7 @@ Inspect the current working copy changes, generate a conventional commit message
 - `refactor` — restructure without behavior change
 - `test` — add or fix tests
 - `docs` — documentation only
-- `chore` — maintenance, deps, tooling
+- `chore` — RAREST type; only for manual toil with no semantic change (e.g. forgotten lockfile bump, running pre-commit auto-fixes); never for docs (use `docs`), never for deps (use `build`), never for kanban/task files (use `docs`)
 - `build` — build system, Cargo, CI
 - `fixup` — minor correction to a recent commit; signaling that it should be squashed and never pushed
 - `drop` — **ONLY** for a deliberately temporary commit to expose a bug in CI/production, intended for immediate reversion. NEVER use `drop` for removing code, removing a dependency, deleting a feature, or any permanent deletion.
