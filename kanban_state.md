@@ -1,4 +1,5 @@
-ideas:
+## ideas
+
 - pivot to object level analysis. faster, no tests/types, object level granularity
 - Abstractness metric that accounts for semantic abstraction objects. eg Entities, Value Objects, concrete method count.
   - interfaces + semantic abstractions (domain) / objects_count + concrete_methods_count
@@ -15,7 +16,8 @@ ideas:
   - show next top action items
 - quickly scan a github repo of interest for a score/report. browser WASM, easy delivery to user?
 
-user feedback:
+## user feedback
+
 - report of historical metrics over time, to see time trends. CI oriented, weekly resolution.
 - "something like ntops or btops"?
 - "distance metric isn't valuable, actionable"
@@ -23,9 +25,11 @@ user feedback:
 - add VCS data to augment report? eg see stability thru change frequency view.
 - add CI outcomes or Change Failure Rate? to build ROI for improving architecture of modules or objects.
 
-tech debt:
+## tech debt
+
 - test case `test_given_composite_usecase_should_measure_abstractness_above_zero`
 
-done:
+## done
+
 - rm mod.rs, old convention
 - ETA, based on measured Throughput or Cycle Time. 70% confidence interval should do fine
