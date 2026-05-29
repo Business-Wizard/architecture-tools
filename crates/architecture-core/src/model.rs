@@ -72,10 +72,10 @@ pub enum TraitLikeKind {
 /// The overall kind of an object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectKind {
+    Constant,
     Type(TypeKind),
     Function(FunctionKind),
     TraitLike(TraitLikeKind),
-    Constant,
     Unknown,
 }
 
