@@ -1,8 +1,10 @@
+use std::fmt::Debug;
+
 #[derive(Debug, PartialEq)]
 pub enum ObjectType {
-    Constant,
+    Primitive,
     Enum,
-    Function,
+    Function(Vec<ObjectType>),
     Struct,
     Class,
     TraitLike,
@@ -14,9 +16,9 @@ pub struct Abstractness(pub f32);
 
 pub fn calculate_abstractness(object_type: ObjectType) -> Abstractness {
     match object_type {
+        ObjectType::Primitive => Abstractness(0.0),
         ObjectType::Enum => Abstractness(0.0),
-        ObjectType::Constant => Abstractness(0.0),
-        ObjectType::Function => Abstractness(0.0),
+        ObjectType::Function(_) => Abstractness(0.0),
         ObjectType::Struct => Abstractness(0.0),
         ObjectType::Class => Abstractness(0.0),
         ObjectType::TraitLike => Abstractness(1.0),

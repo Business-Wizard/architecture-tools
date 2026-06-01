@@ -27,7 +27,8 @@ fn _part_ast_into_domain(tree: Tree) -> Vec<ObjectType> {
         let node = root.child(i).unwrap();
         match node.kind() {
             "function_definition" => {
-                results.push(ObjectType::Function);
+                let parameters = _extract_paramaters(node);
+                results.push(ObjectType::Function(vec![]));
             }
             "class_definition" => {
                 results.push(ObjectType::Class);
@@ -38,6 +39,12 @@ fn _part_ast_into_domain(tree: Tree) -> Vec<ObjectType> {
     results
 }
 
+fn _extract_paramaters(node: Node) -> Vec<ObjectType> {
+    let parameters: Vec<ObjectType> = Vec::new();
+    let parameter = node.child_by_field_name("parameters").unwrap();
+    vec![]
+}
+
 #[cfg(test)]
 mod test_python_parser {
     use super::*;
@@ -46,7 +53,7 @@ mod test_python_parser {
     fn given_no_param_function_should_return_function_type() {
         let stub_source_code = "def foo(): pass";
         let actual = parse_python(stub_source_code);
-        let expected = vec![ObjectType::Function];
+        let expected = vec![ObjectType::Function(vec![])];
         assert_eq!(actual, expected);
     }
 
@@ -60,7 +67,10 @@ mod test_python_parser {
 
     #[test]
     fn given_function_with_constant_param_should_return_function_type_with_const_param_detail() {
-        todo!()
+        let stub_source_code = "def foo(parameter: int): pass";
+        let actual = parse_python(stub_source_code);
+        let expected = vec![ObjectType::Function(vec![ObjectType::Primitive])];
+        assert_eq!(actual, expected);
     }
 
     #[test]
