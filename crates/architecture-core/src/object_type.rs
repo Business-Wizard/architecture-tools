@@ -1,6 +1,4 @@
-use std::fmt::Debug;
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ObjectType {
     Primitive,
     Enum,

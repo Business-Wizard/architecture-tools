@@ -1,36 +1,27 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use architecture_core::object_type::calculate_abstractness;
 use camino::Utf8PathBuf;
 use ignore::WalkBuilder;
 
 use crate::graph::coupling_graph::FileRole;
-use crate::python_ast::{self, ClassKind, ParsedFile};
+use crate::python_ast::{self, ParsedFile};
 use crate::repo;
 
 #[derive(Debug)]
 pub struct AbstractnessScore {
-    #[expect(dead_code)]
-    pub abstract_types: usize,
-    #[expect(dead_code)]
-    pub total_types: usize,
     pub value: Option<f64>,
 }
 
 impl AbstractnessScore {
-    pub fn new(abstract_types: usize, total_types: usize) -> Self {
-        let value = if total_types == 0 {
-            None
-        } else {
-            #[allow(clippy::cast_precision_loss)]
-            Some(abstract_types as f64 / total_types as f64)
-        };
-
-        Self {
-            abstract_types,
-            total_types,
-            value,
+    pub fn from_object_scores(scores: &[f32]) -> Self {
+        if scores.is_empty() {
+            return Self { value: None };
         }
+        #[allow(clippy::cast_precision_loss)]
+        let mean = scores.iter().copied().map(f64::from).sum::<f64>() / scores.len() as f64;
+        Self { value: Some(mean) }
     }
 }
 
@@ -69,25 +60,22 @@ pub fn compute(repo_root: &Path, include_dirs: &[Utf8PathBuf]) -> AbstractnessMa
             continue;
         }
 
-        let Ok(source) = std::fs::read(path) else {
+        let Ok(source_bytes) = std::fs::read(path) else {
             continue;
         };
 
-        let Some(parsed) = ParsedFile::parse(&source) else {
+        let Some(parsed) = ParsedFile::parse(&source_bytes) else {
             continue;
         };
 
-        let classes = python_ast::find_classes(&parsed);
+        let objects = python_ast::parse_objects(&parsed);
+        let scores: Vec<f32> = objects
+            .into_iter()
+            .map(|obj| calculate_abstractness(obj).0)
+            .collect();
 
-        let abstract_count = classes
-            .iter()
-            .filter(|c| c.kind == ClassKind::Abstract || c.kind == ClassKind::Protocol)
-            .count();
-
-        let total_count = classes.len();
-
-        if total_count > 0 {
-            by_file.insert(rel, AbstractnessScore::new(abstract_count, total_count));
+        if !scores.is_empty() {
+            by_file.insert(rel, AbstractnessScore::from_object_scores(&scores));
         }
     }
 
@@ -99,26 +87,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_score_with_no_types_should_have_none_value() {
-        let score = AbstractnessScore::new(0, 0);
+    fn given_no_object_scores_should_have_none_value() {
+        let score = AbstractnessScore::from_object_scores(&[]);
         assert!(score.value.is_none());
     }
 
     #[test]
-    fn test_score_with_all_abstract_should_have_value_one() {
-        let score = AbstractnessScore::new(2, 2);
+    fn given_all_abstract_scores_should_have_value_one() {
+        let score = AbstractnessScore::from_object_scores(&[1.0, 1.0]);
         assert_eq!(score.value, Some(1.0));
     }
 
     #[test]
-    fn test_score_with_no_abstract_should_have_value_zero() {
-        let score = AbstractnessScore::new(0, 3);
+    fn given_all_concrete_scores_should_have_value_zero() {
+        let score = AbstractnessScore::from_object_scores(&[0.0, 0.0]);
         assert_eq!(score.value, Some(0.0));
     }
 
     #[test]
-    fn test_score_with_mixed_should_compute_ratio() {
-        let score = AbstractnessScore::new(1, 4);
-        assert_eq!(score.value, Some(0.25));
+    fn given_mixed_scores_should_compute_mean() {
+        let score = AbstractnessScore::from_object_scores(&[0.0, 1.0]);
+        assert_eq!(score.value, Some(0.5));
     }
 }

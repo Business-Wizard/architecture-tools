@@ -43,6 +43,12 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
         .map(|n| (&n.file, n.instability.as_f64()))
         .collect();
 
+    let abstractness_map: HashMap<_, f64> = metrics
+        .nodes
+        .iter()
+        .map(|n| (&n.file, n.abstractness))
+        .collect();
+
     let mut out = String::new();
     writeln!(out, "digraph coupling {{").unwrap();
     writeln!(out, "    rankdir=RL;").unwrap();
@@ -50,7 +56,13 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
     for &n in &source_nodes {
         let node = &idx.graph[n];
         let i = instability_map.get(&node.path).copied().unwrap_or(0.0);
-        let label = format!("{}\\nI={:.2}", node.path.as_str().replace('"', "\\\""), i);
+        let a = abstractness_map.get(&node.path).copied().unwrap_or(0.0);
+        let label = format!(
+            "{}\\nI={:.2}  A={:.2}",
+            node.path.as_str().replace('"', "\\\""),
+            i,
+            a
+        );
         let attrs = if cycles.contains(&n) {
             "shape=box style=filled fillcolor=lightcoral"
         } else {
@@ -228,5 +240,12 @@ mod tests {
         let empty = MetricsResult { nodes: vec![] };
         let dot = render(&idx, &empty);
         assert!(dot.contains("digraph coupling {"));
+    }
+
+    #[test]
+    fn test_render_should_include_abstractness_label_on_nodes() {
+        let idx = fixture_source_only();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains("A="));
     }
 }
