@@ -393,6 +393,26 @@ fn extract_init_object_params(class_node: Node<'_>, source: &[u8]) -> Vec<Object
     vec![]
 }
 
+fn is_value_object(class_node: Node<'_>, source: &[u8]) -> bool {
+    let Some(body) = class_node.child_by_field_name("body") else {
+        return true;
+    };
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() == "function_definition" {
+            let name = child
+                .child_by_field_name("name")
+                .and_then(|n| n.utf8_text(source).ok())
+                .unwrap_or("");
+            let is_dunder = name.starts_with("__") && name.ends_with("__");
+            if !is_dunder {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn classify_python_class(node: Node<'_>, source: &[u8]) -> ObjectType {
     let bases = extract_python_superclasses(node, source);
     for base in &bases {
@@ -402,6 +422,9 @@ fn classify_python_class(node: Node<'_>, source: &[u8]) -> ObjectType {
             "Enum" | "enum.Enum" => return ObjectType::Enum,
             _ => {}
         }
+    }
+    if is_value_object(node, source) {
+        return ObjectType::ValueObject;
     }
     ObjectType::Class(extract_init_object_params(node, source))
 }
@@ -552,8 +575,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_objects_class_should_return_class_type() {
-        assert_eq!(parse("class Bar: pass"), vec![ObjectType::Class(vec![])]);
+    fn test_parse_objects_class_should_return_value_object() {
+        assert_eq!(parse("class Bar: pass"), vec![ObjectType::ValueObject]);
     }
 
     #[test]
@@ -575,11 +598,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_objects_class_init_with_const_param_should_return_class_type_with_const_param_detail()
-     {
+    fn test_parse_objects_class_init_with_const_param_should_return_value_object() {
         assert_eq!(
             parse("class Foo:\n    def __init__(self, x: int): pass"),
-            vec![ObjectType::Class(vec![ObjectType::Primitive])]
+            vec![ObjectType::ValueObject]
         );
     }
 
@@ -709,40 +731,31 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_objects_plain_class_inheriting_unknown_base_should_return_class_with_empty_params()
-     {
-        assert_eq!(
-            parse("class Foo(Bar): pass"),
-            vec![ObjectType::Class(vec![])]
-        );
+    fn test_parse_objects_plain_class_inheriting_unknown_base_should_return_value_object() {
+        assert_eq!(parse("class Foo(Bar): pass"), vec![ObjectType::ValueObject]);
     }
 
     #[test]
-    fn test_parse_objects_class_init_with_interface_param_should_return_class_with_interface_param()
-    {
+    fn test_parse_objects_class_init_with_interface_param_should_return_value_object() {
         assert_eq!(
             parse("class OrderService:\n    def __init__(self, repo: Protocol): pass"),
-            vec![ObjectType::Class(vec![ObjectType::Interface])]
+            vec![ObjectType::ValueObject]
         );
     }
 
     #[test]
-    fn test_parse_objects_class_init_with_mixed_params_should_return_class_with_blended_abstractness()
-     {
+    fn test_parse_objects_class_init_with_mixed_params_should_return_value_object() {
         assert_eq!(
             parse("class BillingService:\n    def __init__(self, repo: Protocol, rate: int): pass"),
-            vec![ObjectType::Class(vec![
-                ObjectType::Interface,
-                ObjectType::Primitive
-            ])]
+            vec![ObjectType::ValueObject]
         );
     }
 
     #[test]
-    fn test_parse_objects_class_init_with_only_self_should_return_class_with_empty_params() {
+    fn test_parse_objects_class_init_with_only_self_should_return_value_object() {
         assert_eq!(
             parse("class Foo:\n    def __init__(self): pass"),
-            vec![ObjectType::Class(vec![])]
+            vec![ObjectType::ValueObject]
         );
     }
 
@@ -758,7 +771,7 @@ mod tests {
     fn test_parse_objects_file_with_function_and_class_should_return_both() {
         assert_eq!(
             parse("def foo(): pass\nclass Bar: pass"),
-            vec![ObjectType::Function(vec![]), ObjectType::Class(vec![])]
+            vec![ObjectType::Function(vec![]), ObjectType::ValueObject]
         );
     }
 
@@ -768,10 +781,39 @@ mod tests {
             parse(
                 "class Repo(Protocol): pass\nclass Service:\n    def __init__(self, repo: Protocol): pass"
             ),
-            vec![
-                ObjectType::Interface,
-                ObjectType::Class(vec![ObjectType::Interface])
-            ]
+            vec![ObjectType::Interface, ObjectType::ValueObject]
+        );
+    }
+
+    #[test]
+    fn test_parse_objects_class_with_only_init_should_return_value_object() {
+        assert_eq!(
+            parse("class Customer:\n    def __init__(self, name: str): pass"),
+            vec![ObjectType::ValueObject]
+        );
+    }
+
+    #[test]
+    fn test_parse_objects_class_with_non_dunder_method_should_return_class() {
+        assert_eq!(
+            parse("class Foo:\n    def do_thing(self): pass"),
+            vec![ObjectType::Class(vec![])]
+        );
+    }
+
+    #[test]
+    fn test_parse_objects_class_with_dunder_and_init_should_return_value_object() {
+        assert_eq!(
+            parse("class Foo:\n    def __init__(self): pass\n    def __repr__(self): pass"),
+            vec![ObjectType::ValueObject]
+        );
+    }
+
+    #[test]
+    fn test_parse_objects_class_with_init_and_non_dunder_should_return_class() {
+        assert_eq!(
+            parse("class Foo:\n    def __init__(self, x: int): pass\n    def get_x(self): pass"),
+            vec![ObjectType::Class(vec![ObjectType::Primitive])]
         );
     }
 }

@@ -5,6 +5,7 @@ pub enum ObjectType {
     Function(Vec<ObjectType>),
     Struct,
     Class(Vec<ObjectType>),
+    ValueObject,
     TraitLike,
     Interface,
 }
@@ -16,7 +17,7 @@ fn calculate_abstractness_ref(object_type: &ObjectType) -> f32 {
     match object_type {
         ObjectType::Primitive | ObjectType::Enum | ObjectType::Struct => 0.0,
         ObjectType::Function(params) | ObjectType::Class(params) => mean_abstractness(params),
-        ObjectType::TraitLike | ObjectType::Interface => 1.0,
+        ObjectType::ValueObject | ObjectType::TraitLike | ObjectType::Interface => 1.0,
     }
 }
 
@@ -37,13 +38,22 @@ pub fn calculate_abstractness(object_type: ObjectType) -> Abstractness {
         ObjectType::Function(params) | ObjectType::Class(params) => {
             Abstractness(mean_abstractness(&params))
         }
-        ObjectType::TraitLike | ObjectType::Interface => Abstractness(1.0),
+        ObjectType::ValueObject | ObjectType::TraitLike | ObjectType::Interface => {
+            Abstractness(1.0)
+        }
     }
 }
 
 #[cfg(test)]
 mod test_abstractness {
     use super::*;
+
+    #[test]
+    fn given_a_value_object_should_measure_one() {
+        let actual = calculate_abstractness(ObjectType::ValueObject);
+        let expected = Abstractness(1.0);
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn given_an_enum_object_should_measure_zero() {
