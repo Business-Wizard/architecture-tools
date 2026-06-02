@@ -14,6 +14,7 @@ pub enum ObjectType {
 #[derive(Debug, PartialEq)]
 pub struct Abstractness(pub f32);
 
+#[must_use]
 pub fn calculate_abstractness(object_type: ObjectType) -> Abstractness {
     match object_type {
         ObjectType::Primitive => Abstractness(0.0),

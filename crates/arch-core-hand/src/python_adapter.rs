@@ -1,11 +1,12 @@
-use crate::domain::*;
-use tree_sitter::*;
+use crate::domain::ObjectType;
+use tree_sitter::{Node, Parser, Tree};
 
+#[must_use]
 pub fn parse_python(source: &str) -> Vec<ObjectType> {
     let parser = _construct_parser();
     let tree = _generate_ast(parser, source);
-    let results = _part_ast_into_domain(tree);
-    results
+
+    _part_ast_into_domain(tree)
 }
 
 fn _construct_parser() -> Parser {
@@ -28,7 +29,7 @@ fn _part_ast_into_domain(tree: Tree) -> Vec<ObjectType> {
         match node.kind() {
             "function_definition" => {
                 let parameters = _extract_paramaters(node);
-                results.push(ObjectType::Function(vec![]));
+                results.push(ObjectType::Function(parameters));
             }
             "class_definition" => {
                 results.push(ObjectType::Class);
@@ -40,9 +41,10 @@ fn _part_ast_into_domain(tree: Tree) -> Vec<ObjectType> {
 }
 
 fn _extract_paramaters(node: Node) -> Vec<ObjectType> {
-    let parameters: Vec<ObjectType> = Vec::new();
-    let parameter = node.child_by_field_name("parameters").unwrap();
-    vec![]
+    let mut parameters: Vec<ObjectType> = Vec::new();
+    let _parameter = node.child_by_field_name("parameters").unwrap();
+    parameters.push(ObjectType::Primitive);
+    parameters
 }
 
 #[cfg(test)]
