@@ -134,18 +134,132 @@ fn run_inspect_command(args: &InspectArgs) {
         timeout,
     ));
     match result {
-        Ok(inspect) => match serde_json::to_string_pretty(&inspect) {
-            Ok(json) => println!("{json}"),
-            Err(e) => {
-                eprintln!("error serialising result: {e}");
-                std::process::exit(1);
-            }
-        },
+        Ok(inspect) => println!("{}", inspect_to_dot(&inspect)),
         Err(e) => {
             eprintln!("error: {e}");
             std::process::exit(1);
         }
     }
+}
+
+fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
+    use std::collections::HashSet;
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    writeln!(out, "digraph inspection {{").unwrap();
+    writeln!(out, "    rankdir=LR;").unwrap();
+
+    if !result.module_deps.is_empty() {
+        // Build a set of root prefixes that originate from the scanned package.
+        // Any `to` whose first component doesn't appear here is stdlib/3rd-party noise.
+        let internal_roots: HashSet<&str> = result
+            .module_deps
+            .iter()
+            .map(|d| d.from.split('.').next().unwrap_or(d.from.as_str()))
+            .collect();
+        let is_internal = |name: &str| {
+            let root = name.split('.').next().unwrap_or(name);
+            internal_roots.contains(root)
+        };
+
+        writeln!(out).unwrap();
+        let mut seen: HashSet<(&str, &str)> = HashSet::new();
+        for dep in &result.module_deps {
+            if is_internal(dep.to.as_str()) && seen.insert((dep.from.as_str(), dep.to.as_str())) {
+                writeln!(out, "    \"{}\" -> \"{}\";", dep.from, dep.to).unwrap();
+            }
+        }
+    }
+
+    if !result.classes.is_empty() {
+        let mut module_order: Vec<&str> = Vec::new();
+        let mut seen_modules: HashSet<&str> = HashSet::new();
+        for cls in &result.classes {
+            if seen_modules.insert(cls.module.as_str()) {
+                module_order.push(cls.module.as_str());
+            }
+        }
+        for module in module_order {
+            let cluster_id = module.replace('.', "_");
+            writeln!(out).unwrap();
+            writeln!(out, "    subgraph cluster_{cluster_id} {{").unwrap();
+            writeln!(out, "        label=\"{module}\";").unwrap();
+            for cls in result.classes.iter().filter(|c| c.module == module) {
+                writeln!(
+                    out,
+                    "        \"{}\" [shape=record, label=\"{}\"];",
+                    cls.name,
+                    build_record_label(cls)
+                )
+                .unwrap();
+            }
+            writeln!(out, "    }}").unwrap();
+        }
+    }
+
+    let all_class_names: HashSet<&str> = result.classes.iter().map(|c| c.name.as_str()).collect();
+
+    for cls in &result.classes {
+        for base in &cls.bases {
+            let base_name = base.split('.').next_back().unwrap_or(base.as_str());
+            if all_class_names.contains(base_name) {
+                writeln!(
+                    out,
+                    "    \"{}\" -> \"{}\" [style=dashed, label=\"extends\"];",
+                    cls.name, base_name
+                )
+                .unwrap();
+            }
+        }
+        for dep in &cls.class_deps {
+            let is_base = cls
+                .bases
+                .iter()
+                .any(|b| b.split('.').next_back().unwrap_or(b.as_str()) == dep.as_str());
+            if !is_base {
+                writeln!(out, "    \"{}\" -> \"{}\" [label=\"uses\"];", cls.name, dep).unwrap();
+            }
+        }
+    }
+
+    writeln!(out, "}}").unwrap();
+    out
+}
+
+fn build_record_label(cls: &py_analyzer::ClassDef) -> String {
+    let escape = |s: &str| {
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('{', "\\{")
+            .replace('}', "\\}")
+            .replace('|', "\\|")
+            .replace('<', "\\<")
+            .replace('>', "\\>")
+    };
+
+    let mut sections: Vec<String> = vec![escape(&cls.name)];
+
+    if !cls.attributes.is_empty() {
+        sections.push(
+            cls.attributes
+                .iter()
+                .map(|a| escape(a))
+                .collect::<Vec<_>>()
+                .join("\\n"),
+        );
+    }
+    if !cls.methods.is_empty() {
+        sections.push(
+            cls.methods
+                .iter()
+                .map(|m| format!("{}()", escape(m)))
+                .collect::<Vec<_>>()
+                .join("\\n"),
+        );
+    }
+
+    format!("{{{}}}", sections.join("|"))
 }
 
 fn run_static_command(args: &RunArgs) {
