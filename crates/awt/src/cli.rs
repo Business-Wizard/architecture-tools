@@ -55,6 +55,12 @@ pub struct InspectArgs {
 
     #[arg(long, default_value_t = 120, help = "Timeout in seconds for each tool")]
     pub timeout_secs: u64,
+
+    #[arg(
+        long,
+        help = "Write DOT output to awt-inspect.dot in the current directory"
+    )]
+    pub save: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -134,7 +140,19 @@ fn run_inspect_command(args: &InspectArgs) {
         timeout,
     ));
     match result {
-        Ok(inspect) => println!("{}", inspect_to_dot(&inspect)),
+        Ok(inspect) => {
+            let dot = inspect_to_dot(&inspect);
+            if args.save {
+                let path = std::path::Path::new("awt-inspect.dot");
+                if let Err(e) = std::fs::write(path, &dot) {
+                    eprintln!("error writing awt-inspect.dot: {e}");
+                    std::process::exit(1);
+                }
+                eprintln!("wrote awt-inspect.dot");
+            } else {
+                print!("{dot}");
+            }
+        }
         Err(e) => {
             eprintln!("error: {e}");
             std::process::exit(1);
