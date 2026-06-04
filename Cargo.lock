@@ -98,6 +98,7 @@ dependencies = [
  "comfy-table",
  "ignore",
  "indicatif",
+ "mutation-test",
  "petgraph",
  "plotters",
  "py-analyzer",
@@ -873,6 +874,15 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mutation-test"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

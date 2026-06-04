@@ -235,8 +235,7 @@ fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
             if let Some(base_id) = class_node_id.get(base_name) {
                 writeln!(
                     out,
-                    "    \"{}\" -> \"{}\" [style=dashed, label=\"extends\"];",
-                    src_id, base_id
+                    "    \"{src_id}\" -> \"{base_id}\" [style=dashed, label=\"extends\"];"
                 )
                 .unwrap();
             }
@@ -246,15 +245,8 @@ fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
                 .bases
                 .iter()
                 .any(|b| b.split('.').next_back().unwrap_or(b.as_str()) == dep.as_str());
-            if !is_base {
-                if let Some(dep_id) = class_node_id.get(dep.as_str()) {
-                    writeln!(
-                        out,
-                        "    \"{}\" -> \"{}\" [label=\"uses\"];",
-                        src_id, dep_id
-                    )
-                    .unwrap();
-                }
+            if !is_base && let Some(dep_id) = class_node_id.get(dep.as_str()) {
+                writeln!(out, "    \"{src_id}\" -> \"{dep_id}\" [label=\"uses\"];").unwrap();
             }
         }
     }

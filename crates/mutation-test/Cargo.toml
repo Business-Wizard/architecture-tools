@@ -1,0 +1,15 @@
+[package]
+name = "mutation-test"
+version = "0.1.0"
+edition = "2024"
+description = "Pure byte-range mutation operators for Python source code."
+license = "AGPL-3.0-or-later"
+authors = ["Better Bearings"]
+
+[dependencies]
+camino = { version = "1", features = ["serde1"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0"
+
+[lints]
+workspace = true

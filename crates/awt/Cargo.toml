@@ -8,6 +8,7 @@ authors = ["Better Bearings"]
 
 [dependencies]
 architecture-core = { path = "../architecture-core" }
+mutation-test = { path = "../mutation-test" }
 py-analyzer = { path = "../py-analyzer" }
 anyhow = "1.0"
 thiserror = "2.0"

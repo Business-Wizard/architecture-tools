@@ -33,7 +33,6 @@ fn rename_first_non_self(params: &str) -> Option<String> {
     })?;
 
     let param = parts[first_non_self];
-    // Extract just the name (before `:` or `=`)
     let name = param.trim().split(':').next()?.split('=').next()?.trim();
     let renamed = param.replacen(name, &format!("{RENAME_PREFIX}{name}"), 1);
 

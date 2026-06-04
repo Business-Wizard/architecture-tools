@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/awt", "crates/architecture-core", "crates/py-analyzer"]
+members = ["crates/awt", "crates/architecture-core", "crates/mutation-test", "crates/py-analyzer"]
 resolver = "2"
 
 [workspace.metadata]

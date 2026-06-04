@@ -4,7 +4,6 @@ use crate::model::MutationError;
 
 const MOVED_DIR: &str = "_awt_moved";
 
-/// Moves the target file into `_awt_moved/` subdirectory inside the temp repo.
 pub fn apply(repo_root: &Path, rel_path: &str) -> Result<(), MutationError> {
     let source = repo_root.join(rel_path);
 

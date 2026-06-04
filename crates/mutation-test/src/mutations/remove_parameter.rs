@@ -25,7 +25,6 @@ fn remove_last_param(params: &str) -> Option<String> {
     let inner = params.strip_prefix('(')?.strip_suffix(')')?;
     let parts: Vec<&str> = inner.split(',').collect();
 
-    // Find last non-self/cls param
     let last_removable = parts
         .iter()
         .enumerate()

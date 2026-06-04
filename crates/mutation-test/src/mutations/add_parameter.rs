@@ -12,7 +12,6 @@ pub fn apply(source: &[u8], candidate: &Candidate) -> Result<Vec<u8>, MutationEr
 
     let params_src = &source[start..end];
 
-    // Find the closing ')' inside the params slice.
     let close_offset = find_closing_paren(params_src).ok_or(MutationError::OutOfBounds)?;
     let insert_at = start + close_offset;
 
@@ -37,8 +36,6 @@ fn build_insertion(params_src: &[u8], close_offset: usize) -> String {
         .rev()
         .find(|&&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r');
 
-    // If the param list has only `self`/`cls` or is empty, insert without leading comma.
-    // Otherwise prepend a comma separator.
     let needs_comma = trimmed.is_some_and(|&b| b != b'(');
 
     if needs_comma {

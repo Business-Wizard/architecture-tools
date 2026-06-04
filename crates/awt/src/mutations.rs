@@ -1,6 +1,3 @@
-pub mod add_parameter;
-pub mod move_module;
-pub mod remove_import;
-pub mod remove_module;
-pub mod remove_parameter;
-pub mod rename_parameter;
+pub use mutation_test::mutations::{
+    add_parameter, move_module, remove_import, remove_module, remove_parameter, rename_parameter,
+};
