@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use tree_sitter::{Node, Parser, Tree};
@@ -28,10 +28,17 @@ pub fn extract(package_path: &Path) -> Result<(Vec<ModuleDep>, Vec<ClassDef>), I
         collect_raw_classes(&parsed, &module_name, &mut raw_classes);
     }
 
+    // Build per-class qualified-name lookup: "module.ClassName" → qualified node ID.
+    // Used by resolve_class_deps so deps are emitted as qualified strings.
+    let qualified_class_set: HashSet<String> = raw_classes
+        .iter()
+        .map(|c| format!("{}.{}", c.module, c.name))
+        .collect();
     let all_class_names: HashSet<String> = raw_classes.iter().map(|c| c.name.clone()).collect();
+
     let classes = raw_classes
         .into_iter()
-        .map(|rc| resolve_class_deps(rc, &all_class_names))
+        .map(|rc| resolve_class_deps(rc, &all_class_names, &qualified_class_set))
         .collect();
 
     Ok((module_deps, classes))
@@ -134,6 +141,8 @@ fn extract_module_names(statement: &str, current_module: &str) -> Vec<String> {
             .unwrap_or(module_part.len());
         if dot_count > 0 {
             // Relative import: resolve against current_module's ancestor package.
+            // When the module is flat (no dots), a single-dot import refers to a sibling
+            // module in the same scan root, so the resolved name is just the suffix.
             let suffix = &module_part[dot_count..];
             if let Some(anchor) = package_anchor(current_module, dot_count) {
                 let resolved = if suffix.is_empty() {
@@ -142,6 +151,9 @@ fn extract_module_names(statement: &str, current_module: &str) -> Vec<String> {
                     format!("{anchor}.{suffix}")
                 };
                 return vec![resolved];
+            }
+            if dot_count == 1 && !suffix.is_empty() {
+                return vec![suffix.to_string()];
             }
             return vec![];
         }
@@ -196,21 +208,33 @@ struct RawClass {
     methods: Vec<String>,
     /// Identifiers referenced anywhere in the class body (for `class_deps` resolution).
     referenced_names: Vec<String>,
+    /// Maps imported symbol name → the qualified module it came from.
+    /// Built from file-level `from X import Y` statements so deps can be qualified.
+    imported_names: HashMap<String, String>,
 }
 
 fn collect_raw_classes(parsed: &ParsedFile, module_name: &str, out: &mut Vec<RawClass>) {
+    let imports = find_import_statements(parsed.root(), &parsed.source);
+    let imported_names = build_name_to_module_map(&imports, module_name);
+
     let root = parsed.root();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
         if child.kind() == "class_definition"
-            && let Some(rc) = extract_raw_class(child, &parsed.source, module_name)
+            && let Some(rc) =
+                extract_raw_class(child, &parsed.source, module_name, imported_names.clone())
         {
             out.push(rc);
         }
     }
 }
 
-fn extract_raw_class(node: Node<'_>, source: &[u8], module_name: &str) -> Option<RawClass> {
+fn extract_raw_class(
+    node: Node<'_>,
+    source: &[u8],
+    module_name: &str,
+    imported_names: HashMap<String, String>,
+) -> Option<RawClass> {
     let name = node
         .child_by_field_name("name")?
         .utf8_text(source)
@@ -230,7 +254,46 @@ fn extract_raw_class(node: Node<'_>, source: &[u8], module_name: &str) -> Option
         attributes,
         methods,
         referenced_names,
+        imported_names,
     })
+}
+
+/// Builds a map of `symbol_name → qualified_module` from file-level import statements.
+/// e.g. `from .order import Order` in module `billing` → `{"Order": "order"}`.
+fn build_name_to_module_map(
+    statements: &[String],
+    current_module: &str,
+) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for stmt in statements {
+        let s = stmt.trim();
+        if let Some(rest) = s.strip_prefix("from ") {
+            let mut parts = rest.splitn(2, " import ");
+            let Some(module_part) = parts.next() else {
+                continue;
+            };
+            let Some(names_part) = parts.next() else {
+                continue;
+            };
+            // Resolve the module the same way extract_module_names does.
+            let resolved_modules = extract_module_names(stmt, current_module);
+            let Some(resolved_module) = resolved_modules.into_iter().next() else {
+                continue;
+            };
+            let _ = module_part; // used indirectly via extract_module_names
+            for name in names_part.split(',') {
+                let symbol = name
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(|c: char| c == '(' || c == ')');
+                if !symbol.is_empty() {
+                    map.insert(symbol.to_string(), resolved_module.clone());
+                }
+            }
+        }
+    }
+    map
 }
 
 fn extract_bases(class_node: Node<'_>, source: &[u8]) -> Vec<String> {
@@ -325,12 +388,26 @@ fn collect_identifiers_rec(node: Node<'_>, source: &[u8], out: &mut Vec<String>)
     }
 }
 
-fn resolve_class_deps(rc: RawClass, all_class_names: &HashSet<String>) -> ClassDef {
+fn resolve_class_deps(
+    rc: RawClass,
+    all_class_names: &HashSet<String>,
+    qualified_class_set: &HashSet<String>,
+) -> ClassDef {
     let mut class_deps: Vec<String> = rc
         .referenced_names
         .iter()
         .filter(|n| *n != &rc.name && all_class_names.contains(*n))
-        .cloned()
+        .map(|n| {
+            // If the file imported this name from a known module, emit a qualified dep.
+            // This resolves ambiguity when multiple modules define a class with the same name.
+            if let Some(src_module) = rc.imported_names.get(n) {
+                let qualified = format!("{src_module}.{n}");
+                if qualified_class_set.contains(&qualified) {
+                    return qualified;
+                }
+            }
+            n.clone()
+        })
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -471,6 +548,10 @@ mod tests {
     #[test]
     fn test_resolve_class_deps_should_reference_known_classes() {
         let all = HashSet::from(["Customer".to_string(), "Product".to_string()]);
+        let qualified = HashSet::from([
+            "myapp.domain.Customer".to_string(),
+            "myapp.domain.Product".to_string(),
+        ]);
         let rc = RawClass {
             module: "myapp.domain".to_string(),
             name: "Order".to_string(),
@@ -483,8 +564,9 @@ mod tests {
                 "str".to_string(),
                 "Order".to_string(),
             ],
+            imported_names: HashMap::new(),
         };
-        let def = resolve_class_deps(rc, &all);
+        let def = resolve_class_deps(rc, &all, &qualified);
         assert_eq!(def.class_deps, vec!["Customer", "Product"]);
     }
 }

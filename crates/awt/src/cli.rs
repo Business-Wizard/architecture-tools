@@ -161,7 +161,7 @@ fn run_inspect_command(args: &InspectArgs) {
 }
 
 fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::fmt::Write as _;
 
     let mut out = String::new();
@@ -190,6 +190,17 @@ fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
         }
     }
 
+    // Maps both bare name and qualified "module.Name" → the DOT node ID.
+    // Bare-name entries are last-one-wins (ambiguous case); qualified entries are exact.
+    // class_deps from py-analyzer emit qualified strings when import info is available,
+    // so those lookups always resolve correctly regardless of name collisions.
+    let mut class_node_id: HashMap<String, String> = HashMap::new();
+    for c in &result.classes {
+        let node_id = format!("{}.{}", c.module, c.name);
+        class_node_id.insert(c.name.clone(), node_id.clone());
+        class_node_id.insert(node_id.clone(), node_id);
+    }
+
     if !result.classes.is_empty() {
         let mut module_order: Vec<&str> = Vec::new();
         let mut seen_modules: HashSet<&str> = HashSet::new();
@@ -204,10 +215,11 @@ fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
             writeln!(out, "    subgraph cluster_{cluster_id} {{").unwrap();
             writeln!(out, "        label=\"{module}\";").unwrap();
             for cls in result.classes.iter().filter(|c| c.module == module) {
+                let node_id = format!("{}.{}", cls.module, cls.name);
                 writeln!(
                     out,
                     "        \"{}\" [shape=record, label=\"{}\"];",
-                    cls.name,
+                    node_id,
                     build_record_label(cls)
                 )
                 .unwrap();
@@ -216,16 +228,15 @@ fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
         }
     }
 
-    let all_class_names: HashSet<&str> = result.classes.iter().map(|c| c.name.as_str()).collect();
-
     for cls in &result.classes {
+        let src_id = format!("{}.{}", cls.module, cls.name);
         for base in &cls.bases {
             let base_name = base.split('.').next_back().unwrap_or(base.as_str());
-            if all_class_names.contains(base_name) {
+            if let Some(base_id) = class_node_id.get(base_name) {
                 writeln!(
                     out,
                     "    \"{}\" -> \"{}\" [style=dashed, label=\"extends\"];",
-                    cls.name, base_name
+                    src_id, base_id
                 )
                 .unwrap();
             }
@@ -236,7 +247,14 @@ fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
                 .iter()
                 .any(|b| b.split('.').next_back().unwrap_or(b.as_str()) == dep.as_str());
             if !is_base {
-                writeln!(out, "    \"{}\" -> \"{}\" [label=\"uses\"];", cls.name, dep).unwrap();
+                if let Some(dep_id) = class_node_id.get(dep.as_str()) {
+                    writeln!(
+                        out,
+                        "    \"{}\" -> \"{}\" [label=\"uses\"];",
+                        src_id, dep_id
+                    )
+                    .unwrap();
+                }
             }
         }
     }
