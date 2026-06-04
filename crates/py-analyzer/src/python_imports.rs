@@ -1,0 +1,490 @@
+use std::collections::HashSet;
+use std::path::Path;
+
+use tree_sitter::{Node, Parser, Tree};
+
+use crate::error::InspectorError;
+use crate::model::{ClassDef, ModuleDep};
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+pub fn extract(package_path: &Path) -> Result<(Vec<ModuleDep>, Vec<ClassDef>), InspectorError> {
+    let py_files = collect_python_files(package_path)?;
+
+    let mut raw_classes: Vec<RawClass> = Vec::new();
+    let mut module_deps: Vec<ModuleDep> = Vec::new();
+
+    for file in &py_files {
+        let source = std::fs::read(file).map_err(InspectorError::Io)?;
+        let module_name = path_to_module_name(file, package_path);
+
+        let Some(parsed) = ParsedFile::parse(&source) else {
+            continue;
+        };
+
+        collect_module_deps(&parsed, &module_name, &mut module_deps);
+        collect_raw_classes(&parsed, &module_name, &mut raw_classes);
+    }
+
+    let all_class_names: HashSet<String> = raw_classes.iter().map(|c| c.name.clone()).collect();
+    let classes = raw_classes
+        .into_iter()
+        .map(|rc| resolve_class_deps(rc, &all_class_names))
+        .collect();
+
+    Ok((module_deps, classes))
+}
+
+// ---------------------------------------------------------------------------
+// File walking
+// ---------------------------------------------------------------------------
+
+fn collect_python_files(root: &Path) -> Result<Vec<std::path::PathBuf>, InspectorError> {
+    let mut files = Vec::new();
+    for result in ignore::Walk::new(root) {
+        let entry = result.map_err(|e| InspectorError::Io(std::io::Error::other(e.to_string())))?;
+        let path = entry.path().to_path_buf();
+        if path.extension().and_then(|e| e.to_str()) == Some("py") {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
+
+// ---------------------------------------------------------------------------
+// Path → dotted module name
+// Mirrors architecture_builder::path_to_qualified_name in the awt crate.
+// ---------------------------------------------------------------------------
+
+fn path_to_module_name(file: &Path, root: &Path) -> String {
+    let rel = file.strip_prefix(root).unwrap_or(file);
+    rel.to_string_lossy()
+        .trim_end_matches(".py")
+        .replace(['/', '\\'], ".")
+}
+
+// ---------------------------------------------------------------------------
+// Parsed file wrapper
+// ---------------------------------------------------------------------------
+
+struct ParsedFile {
+    source: Vec<u8>,
+    tree: Tree,
+}
+
+impl ParsedFile {
+    fn parse(source: &[u8]) -> Option<Self> {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .ok()?;
+        let tree = parser.parse(source, None)?;
+        Some(Self {
+            source: source.to_vec(),
+            tree,
+        })
+    }
+
+    fn root(&self) -> Node<'_> {
+        self.tree.root_node()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Module-level import extraction
+// Ported from awt/src/python_ast.rs: find_imports + extract_module_names.
+// ---------------------------------------------------------------------------
+
+fn collect_module_deps(parsed: &ParsedFile, module_name: &str, out: &mut Vec<ModuleDep>) {
+    let imports = find_import_statements(parsed.root(), &parsed.source);
+    for stmt in imports {
+        for target in extract_module_names(&stmt, module_name) {
+            out.push(ModuleDep {
+                from: module_name.to_string(),
+                to: target,
+            });
+        }
+    }
+}
+
+fn find_import_statements(node: Node<'_>, source: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_import_statements(node, source, &mut out);
+    out
+}
+
+fn collect_import_statements(node: Node<'_>, source: &[u8], out: &mut Vec<String>) {
+    if matches!(node.kind(), "import_statement" | "import_from_statement") {
+        out.push(node.utf8_text(source).unwrap_or("").to_string());
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_import_statements(child, source, out);
+    }
+}
+
+fn extract_module_names(statement: &str, current_module: &str) -> Vec<String> {
+    let s = statement.trim();
+    if let Some(rest) = s.strip_prefix("from ") {
+        let module_part = rest.split_whitespace().next().unwrap_or("");
+        let dot_count = module_part
+            .find(|c: char| c != '.')
+            .unwrap_or(module_part.len());
+        if dot_count > 0 {
+            // Relative import: resolve against current_module's ancestor package.
+            let suffix = &module_part[dot_count..];
+            if let Some(anchor) = package_anchor(current_module, dot_count) {
+                let resolved = if suffix.is_empty() {
+                    anchor
+                } else {
+                    format!("{anchor}.{suffix}")
+                };
+                return vec![resolved];
+            }
+            return vec![];
+        }
+        let module =
+            module_part.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_');
+        if module.is_empty() {
+            return vec![];
+        }
+        vec![module.to_string()]
+    } else if let Some(rest) = s.strip_prefix("import ") {
+        rest.split(',')
+            .filter_map(|seg| {
+                let name = seg.split_whitespace().next().unwrap_or("");
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(name.to_string())
+                }
+            })
+            .collect()
+    } else {
+        vec![]
+    }
+}
+
+/// Return the dotted package prefix after going up `levels` from `module`.
+/// One dot  → strip the last component (the file itself) → the containing package.
+/// Two dots → strip two components, etc.
+fn package_anchor(module: &str, levels: usize) -> Option<String> {
+    let parts: Vec<&str> = module.split('.').collect();
+    // `levels` dots means go up `levels` components (1 dot = own package = drop 1).
+    if parts.len() < levels {
+        return None;
+    }
+    let anchor_parts = &parts[..parts.len() - levels];
+    if anchor_parts.is_empty() {
+        None
+    } else {
+        Some(anchor_parts.join("."))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Class analysis
+// ---------------------------------------------------------------------------
+
+struct RawClass {
+    module: String,
+    name: String,
+    bases: Vec<String>,
+    attributes: Vec<String>,
+    methods: Vec<String>,
+    /// Identifiers referenced anywhere in the class body (for `class_deps` resolution).
+    referenced_names: Vec<String>,
+}
+
+fn collect_raw_classes(parsed: &ParsedFile, module_name: &str, out: &mut Vec<RawClass>) {
+    let root = parsed.root();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() == "class_definition"
+            && let Some(rc) = extract_raw_class(child, &parsed.source, module_name)
+        {
+            out.push(rc);
+        }
+    }
+}
+
+fn extract_raw_class(node: Node<'_>, source: &[u8], module_name: &str) -> Option<RawClass> {
+    let name = node
+        .child_by_field_name("name")?
+        .utf8_text(source)
+        .ok()?
+        .to_string();
+
+    let bases = extract_bases(node, source);
+    let body = node.child_by_field_name("body");
+    let attributes = body.map_or_else(Vec::new, |b| extract_self_attributes(b, source));
+    let methods = body.map_or_else(Vec::new, |b| extract_method_names(b, source));
+    let referenced_names = body.map_or_else(Vec::new, |b| collect_identifiers(b, source));
+
+    Some(RawClass {
+        module: module_name.to_string(),
+        name,
+        bases,
+        attributes,
+        methods,
+        referenced_names,
+    })
+}
+
+fn extract_bases(class_node: Node<'_>, source: &[u8]) -> Vec<String> {
+    let Some(superclasses) = class_node.child_by_field_name("superclasses") else {
+        return vec![];
+    };
+    let mut bases = Vec::new();
+    let mut cursor = superclasses.walk();
+    for child in superclasses.children(&mut cursor) {
+        if matches!(child.kind(), "identifier" | "attribute")
+            && let Ok(text) = child.utf8_text(source)
+        {
+            bases.push(text.to_string());
+        }
+    }
+    bases
+}
+
+fn extract_self_attributes(body: Node<'_>, source: &[u8]) -> Vec<String> {
+    let mut attrs = Vec::new();
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() == "function_definition" {
+            let is_init = child
+                .child_by_field_name("name")
+                .and_then(|n| n.utf8_text(source).ok())
+                .is_some_and(|n| n == "__init__");
+            if is_init && let Some(func_body) = child.child_by_field_name("body") {
+                collect_self_assignments(func_body, source, &mut attrs);
+            }
+        }
+    }
+    attrs.sort();
+    attrs.dedup();
+    attrs
+}
+
+fn collect_self_assignments(node: Node<'_>, source: &[u8], out: &mut Vec<String>) {
+    if node.kind() == "assignment" {
+        let lhs = node.child_by_field_name("left");
+        if let Some(lhs_node) = lhs
+            && lhs_node.kind() == "attribute"
+        {
+            let obj = lhs_node.child_by_field_name("object");
+            let attr = lhs_node.child_by_field_name("attribute");
+            if let (Some(obj_node), Some(attr_node)) = (obj, attr)
+                && obj_node.utf8_text(source).unwrap_or("") == "self"
+                && let Ok(attr_name) = attr_node.utf8_text(source)
+            {
+                out.push(attr_name.to_string());
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_self_assignments(child, source, out);
+    }
+}
+
+fn extract_method_names(body: Node<'_>, source: &[u8]) -> Vec<String> {
+    let mut methods = Vec::new();
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() == "function_definition"
+            && let Some(name_node) = child.child_by_field_name("name")
+            && let Ok(name) = name_node.utf8_text(source)
+        {
+            let is_dunder = name.starts_with("__") && name.ends_with("__");
+            if !is_dunder {
+                methods.push(name.to_string());
+            }
+        }
+    }
+    methods
+}
+
+fn collect_identifiers(node: Node<'_>, source: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_identifiers_rec(node, source, &mut out);
+    out
+}
+
+fn collect_identifiers_rec(node: Node<'_>, source: &[u8], out: &mut Vec<String>) {
+    if node.kind() == "identifier"
+        && let Ok(text) = node.utf8_text(source)
+    {
+        out.push(text.to_string());
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_identifiers_rec(child, source, out);
+    }
+}
+
+fn resolve_class_deps(rc: RawClass, all_class_names: &HashSet<String>) -> ClassDef {
+    let mut class_deps: Vec<String> = rc
+        .referenced_names
+        .iter()
+        .filter(|n| *n != &rc.name && all_class_names.contains(*n))
+        .cloned()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    class_deps.sort();
+
+    ClassDef {
+        module: rc.module,
+        name: rc.name,
+        bases: rc.bases,
+        attributes: rc.attributes,
+        methods: rc.methods,
+        class_deps,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(src: &str) -> ParsedFile {
+        ParsedFile::parse(src.as_bytes()).expect("parse failed")
+    }
+
+    #[test]
+    fn test_extract_module_names_import_should_return_module() {
+        assert_eq!(
+            extract_module_names("import foo.bar", "pkg.mod"),
+            vec!["foo.bar"]
+        );
+    }
+
+    #[test]
+    fn test_extract_module_names_from_import_should_return_module() {
+        assert_eq!(
+            extract_module_names("from myapp.domain import Order", "myapp.views"),
+            vec!["myapp.domain"]
+        );
+    }
+
+    #[test]
+    fn test_extract_module_names_single_dot_relative_should_resolve_to_sibling() {
+        // `from .customer import Customer` in `src.order` → `src.customer`
+        assert_eq!(
+            extract_module_names("from .customer import Customer", "src.order"),
+            vec!["src.customer"]
+        );
+    }
+
+    #[test]
+    fn test_extract_module_names_single_dot_bare_relative_should_resolve_to_package() {
+        // `from . import utils` in `src.order` → `src`
+        assert_eq!(
+            extract_module_names("from . import utils", "src.order"),
+            vec!["src"]
+        );
+    }
+
+    #[test]
+    fn test_extract_module_names_double_dot_relative_should_resolve_to_grandparent() {
+        // `from ..domain import Order` in `myapp.views.json` → `myapp.domain`
+        assert_eq!(
+            extract_module_names("from ..domain import Order", "myapp.views.json"),
+            vec!["myapp.domain"]
+        );
+    }
+
+    #[test]
+    fn test_extract_module_names_relative_too_many_dots_should_return_empty() {
+        // More dots than package depth — unresolvable
+        assert!(extract_module_names("from ...x import Y", "src.order").is_empty());
+    }
+
+    #[test]
+    fn test_collect_module_deps_should_emit_edges() {
+        let src = "import myapp.domain\nfrom myapp.usecases import CreateOrder\n";
+        let parsed = parse(src);
+        let mut deps = Vec::new();
+        collect_module_deps(&parsed, "myapp.views", &mut deps);
+        let actual: Vec<(String, String)> = deps.into_iter().map(|d| (d.from, d.to)).collect();
+        assert_eq!(
+            actual,
+            vec![
+                ("myapp.views".to_string(), "myapp.domain".to_string()),
+                ("myapp.views".to_string(), "myapp.usecases".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_collect_module_deps_relative_import_should_resolve_to_sibling_module() {
+        let src = "from .customer import Customer\n";
+        let parsed = parse(src);
+        let mut deps = Vec::new();
+        collect_module_deps(&parsed, "src.order", &mut deps);
+        let actual: Vec<(String, String)> = deps.into_iter().map(|d| (d.from, d.to)).collect();
+        assert_eq!(
+            actual,
+            vec![("src.order".to_string(), "src.customer".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_extract_bases_should_return_base_class_names() {
+        let src = "class Order(Base, Mixin):\n    pass\n";
+        let parsed = parse(src);
+        let root = parsed.root();
+        let class_node = root.child(0).expect("class node");
+        let actual = extract_bases(class_node, &parsed.source);
+        assert_eq!(actual, vec!["Base", "Mixin"]);
+    }
+
+    #[test]
+    fn test_extract_self_attributes_should_return_init_assignments() {
+        let src = "class Order:\n    def __init__(self, id):\n        self.id = id\n        self.status = 'pending'\n";
+        let parsed = parse(src);
+        let root = parsed.root();
+        let class_node = root.child(0).expect("class node");
+        let body = class_node.child_by_field_name("body").expect("body");
+        let actual = extract_self_attributes(body, &parsed.source);
+        assert_eq!(actual, vec!["id", "status"]);
+    }
+
+    #[test]
+    fn test_extract_method_names_should_skip_dunders() {
+        let src = "class Order:\n    def __init__(self): pass\n    def cancel(self): pass\n    def approve(self): pass\n";
+        let parsed = parse(src);
+        let root = parsed.root();
+        let class_node = root.child(0).expect("class node");
+        let body = class_node.child_by_field_name("body").expect("body");
+        let actual = extract_method_names(body, &parsed.source);
+        assert_eq!(actual, vec!["cancel", "approve"]);
+    }
+
+    #[test]
+    fn test_resolve_class_deps_should_reference_known_classes() {
+        let all = HashSet::from(["Customer".to_string(), "Product".to_string()]);
+        let rc = RawClass {
+            module: "myapp.domain".to_string(),
+            name: "Order".to_string(),
+            bases: vec![],
+            attributes: vec![],
+            methods: vec![],
+            referenced_names: vec![
+                "Customer".to_string(),
+                "Product".to_string(),
+                "str".to_string(),
+                "Order".to_string(),
+            ],
+        };
+        let def = resolve_class_deps(rc, &all);
+        assert_eq!(def.class_deps, vec!["Customer", "Product"]);
+    }
+}

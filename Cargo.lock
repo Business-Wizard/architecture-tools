@@ -1047,11 +1047,13 @@ dependencies = [
 name = "py-analyzer"
 version = "0.1.0"
 dependencies = [
+ "camino",
+ "ignore",
  "serde",
  "serde_json",
- "tempfile",
  "thiserror",
- "tokio",
+ "tree-sitter",
+ "tree-sitter-python",
 ]
 
 [[package]]

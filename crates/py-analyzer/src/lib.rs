@@ -1,30 +1,33 @@
 mod error;
 mod model;
-mod pyreverse;
-mod runner;
+mod python_imports;
 
 pub use error::InspectorError;
-pub use model::{InspectResult, ModuleDep};
+pub use model::{ClassDef, InspectResult, ModuleDep};
 
 use std::path::Path;
 use std::time::Duration;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_mins(2);
-
-/// Run pyreverse against `package_path` and return module dependency edges.
+/// Inspect a Python package directory and return module dependency edges and class definitions.
 ///
 /// # Errors
-/// Returns `InspectorError` if pyreverse fails or produces unparseable output.
-pub async fn inspect(package_path: &Path) -> Result<InspectResult, InspectorError> {
-    inspect_with_timeout(package_path, DEFAULT_TIMEOUT).await
+/// Returns `InspectorError` if file I/O or parsing fails.
+pub fn inspect(package_path: &Path) -> Result<InspectResult, InspectorError> {
+    let (module_deps, classes) = python_imports::extract(package_path)?;
+    Ok(InspectResult {
+        module_deps,
+        classes,
+    })
 }
 
+/// Identical to [`inspect`]; the `timeout` parameter is accepted for API compatibility
+/// but ignored (no subprocess is involved).
+///
 /// # Errors
-/// Returns `InspectorError` if pyreverse fails or produces unparseable output.
+/// Returns `InspectorError` if file I/O or parsing fails.
 pub async fn inspect_with_timeout(
     package_path: &Path,
-    timeout: Duration,
+    _timeout: Duration,
 ) -> Result<InspectResult, InspectorError> {
-    let module_deps = pyreverse::extract_module_deps(package_path, timeout).await?;
-    Ok(InspectResult { module_deps })
+    inspect(package_path)
 }
