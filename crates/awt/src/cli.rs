@@ -45,6 +45,16 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     Run(RunArgs),
+    Inspect(InspectArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct InspectArgs {
+    #[arg(help = "Path to the Python package to inspect")]
+    pub path: Utf8PathBuf,
+
+    #[arg(long, default_value_t = 120, help = "Timeout in seconds for each tool")]
+    pub timeout_secs: u64,
 }
 
 #[derive(Parser, Debug)]
@@ -112,6 +122,29 @@ pub fn run() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Run(ref args) => run_command(args),
+        Commands::Inspect(ref args) => run_inspect_command(args),
+    }
+}
+
+fn run_inspect_command(args: &InspectArgs) {
+    let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+    let timeout = std::time::Duration::from_secs(args.timeout_secs);
+    let result = rt.block_on(py_analyzer::inspect_with_timeout(
+        args.path.as_std_path(),
+        timeout,
+    ));
+    match result {
+        Ok(inspect) => match serde_json::to_string_pretty(&inspect) {
+            Ok(json) => println!("{json}"),
+            Err(e) => {
+                eprintln!("error serialising result: {e}");
+                std::process::exit(1);
+            }
+        },
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

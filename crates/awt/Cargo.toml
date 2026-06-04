@@ -8,6 +8,7 @@ authors = ["Better Bearings"]
 
 [dependencies]
 architecture-core = { path = "../architecture-core" }
+py-analyzer = { path = "../py-analyzer" }
 anyhow = "1.0"
 thiserror = "2.0"
 clap = { version = "4", features = ["derive"] }
