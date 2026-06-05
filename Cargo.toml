@@ -7,3 +7,6 @@ default-members = ["crates/awt"]
 
 [workspace.lints.clippy]
 pedantic = "deny"
+
+[patch.crates-io]
+tree-sitter = { path = "vendor/tree-sitter-0.25.10" }
