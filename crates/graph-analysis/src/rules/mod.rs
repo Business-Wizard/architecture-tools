@@ -1,24 +1,18 @@
-mod cross_adapter;
-mod fan_in;
-mod layer_inversion;
+mod cycle;
+mod god_module;
+mod module_hub;
 
 use py_analyzer::InspectResult;
 
-use crate::config::GraphLayerConfig;
-use crate::layer_resolver::LayerResolver;
 use crate::model::{GraphSeverity, GraphViolation};
 
-pub fn run_all(
-    result: &InspectResult,
-    resolver: &LayerResolver<'_>,
-    config: &GraphLayerConfig,
-) -> Vec<GraphViolation> {
+#[must_use]
+pub fn run_all(result: &InspectResult) -> Vec<GraphViolation> {
     let mut violations = vec![];
-    violations.extend(layer_inversion::check(result, resolver));
-    violations.extend(cross_adapter::check(result, resolver));
-    violations.extend(fan_in::check(result, config.fan_in_threshold));
+    violations.extend(cycle::check(result));
+    violations.extend(module_hub::check(result));
+    violations.extend(god_module::check(result));
     violations.sort_by(|a, b| {
-        // Errors before warnings, then alphabetically by message.
         let sev_ord = severity_ord(&b.severity).cmp(&severity_ord(&a.severity));
         sev_ord.then_with(|| a.message.cmp(&b.message))
     });

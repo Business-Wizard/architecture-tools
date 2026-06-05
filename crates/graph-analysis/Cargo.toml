@@ -9,6 +9,7 @@ authors = ["Better Bearings"]
 [dependencies]
 py-analyzer = { path = "../py-analyzer" }
 serde = { version = "1", features = ["derive"] }
+petgraph = "0.7"
 
 [lints]
 workspace = true
