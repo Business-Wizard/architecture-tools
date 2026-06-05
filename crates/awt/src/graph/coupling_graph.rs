@@ -92,6 +92,10 @@ impl GraphIndex {
         let mut node_map: HashMap<Utf8PathBuf, NodeIndex> = HashMap::new();
 
         for file in source_files {
+            get_or_insert_node(&mut graph, &mut node_map, file.clone());
+        }
+
+        for file in source_files {
             let abs = repo_root.join(file.as_str());
             let Ok(source) = std::fs::read(&abs) else {
                 continue;
@@ -223,6 +227,16 @@ mod tests {
         let idx = GraphIndex::build_from_source_imports(&files, root);
 
         assert_eq!(idx.graph.edge_count(), 0);
+    }
+
+    #[test]
+    fn test_build_from_source_imports_should_include_isolated_files_as_nodes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("standalone.py"), b"").unwrap();
+        let files = vec![Utf8PathBuf::from("standalone.py")];
+        let idx = GraphIndex::build_from_source_imports(&files, root);
+        assert_eq!(idx.graph.node_count(), 1);
     }
 
     #[test]
