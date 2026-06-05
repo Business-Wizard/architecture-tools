@@ -96,6 +96,7 @@ dependencies = [
  "clap",
  "colored",
  "comfy-table",
+ "graph-analysis",
  "ignore",
  "indicatif",
  "mutation-test",
@@ -670,6 +671,14 @@ dependencies = [
  "log",
  "regex-automata",
  "regex-syntax",
+]
+
+[[package]]
+name = "graph-analysis"
+version = "0.1.0"
+dependencies = [
+ "py-analyzer",
+ "serde",
 ]
 
 [[package]]

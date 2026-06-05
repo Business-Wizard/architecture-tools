@@ -210,6 +210,44 @@ fn print_metrics_section(metrics: &MetricsResult) {
     println!("  {on_sequence} on main sequence, {warnings} warnings, {failures} failures");
 }
 
+pub fn print_graph_violations_section(violations: &[::graph_analysis::GraphViolation]) {
+    use ::graph_analysis::{GraphSeverity, ViolationKind};
+
+    if violations.is_empty() {
+        println!("\n─── Graph Analysis: no violations ───────────────────────");
+        return;
+    }
+
+    let errors = violations
+        .iter()
+        .filter(|v| v.severity == GraphSeverity::Error)
+        .count();
+    let warnings = violations
+        .iter()
+        .filter(|v| v.severity == GraphSeverity::Warning)
+        .count();
+
+    println!("\n─── Graph Violations ────────────────────────────────────");
+    println!("  {errors} error(s)  {warnings} warning(s)");
+    println!();
+
+    for v in violations {
+        let tag = match &v.kind {
+            ViolationKind::LayerInversion { .. } => "UPWARD DEP ",
+            ViolationKind::CrossAdapterCoupling { .. } => "CROSS-INFRA",
+            ViolationKind::HighFanIn { .. } => "HIGH FAN-IN",
+        };
+        println!("  {tag}  {}", v.message);
+        match &v.kind {
+            ViolationKind::LayerInversion { fix_hint, .. }
+            | ViolationKind::CrossAdapterCoupling { fix_hint, .. } => {
+                println!("             Fix: {fix_hint}");
+            }
+            ViolationKind::HighFanIn { .. } => {}
+        }
+    }
+}
+
 fn print_violations_section(report: &FitnessReport) {
     if report.violations.is_empty() {
         return;

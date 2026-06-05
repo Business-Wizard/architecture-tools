@@ -1,0 +1,14 @@
+[package]
+name = "graph-analysis"
+version = "0.1.0"
+edition = "2024"
+description = "Pure analysis of InspectResult: layer violations and coupling smells."
+license = "AGPL-3.0-or-later"
+authors = ["Better Bearings"]
+
+[dependencies]
+py-analyzer = { path = "../py-analyzer" }
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

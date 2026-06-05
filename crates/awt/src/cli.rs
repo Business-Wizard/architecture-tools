@@ -61,6 +61,18 @@ pub struct InspectArgs {
         help = "Write DOT output to awt-inspect.dot in the current directory"
     )]
     pub save: bool,
+
+    #[arg(long, help = "Analyse layer violations and coupling smells")]
+    pub violations: bool,
+
+    #[arg(
+        long,
+        help = "Path to awt.toml config file (for graph_analysis layers)"
+    )]
+    pub config: Option<Utf8PathBuf>,
+
+    #[arg(long, help = "Exit with code 2 if any graph violations are found")]
+    pub fail_on_violations: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -137,7 +149,19 @@ fn run_inspect_command(args: &InspectArgs) {
     let result = py_analyzer::inspect_with_timeout(args.path.as_std_path(), timeout);
     match result {
         Ok(inspect) => {
-            let dot = inspect_to_dot(&inspect);
+            let violations = if args.violations {
+                let cfg = config::load(args.config.as_ref(), std::path::Path::new("."))
+                    .unwrap_or_default();
+                let v = ::graph_analysis::analyze(&inspect, &cfg.graph_analysis);
+                terminal::print_graph_violations_section(&v);
+                v
+            } else {
+                vec![]
+            };
+
+            let violated_edges = build_violated_edge_set(&violations);
+            let dot = inspect_to_dot(&inspect, &violated_edges);
+
             if args.save {
                 let path = std::path::Path::new("awt-inspect.dot");
                 if let Err(e) = std::fs::write(path, &dot) {
@@ -148,6 +172,10 @@ fn run_inspect_command(args: &InspectArgs) {
             } else {
                 print!("{dot}");
             }
+
+            if args.fail_on_violations && !violations.is_empty() {
+                std::process::exit(2);
+            }
         }
         Err(e) => {
             eprintln!("error: {e}");
@@ -156,7 +184,37 @@ fn run_inspect_command(args: &InspectArgs) {
     }
 }
 
-fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
+fn build_violated_edge_set(
+    violations: &[::graph_analysis::GraphViolation],
+) -> std::collections::HashSet<(String, String)> {
+    use ::graph_analysis::ViolationKind;
+    violations
+        .iter()
+        .filter_map(|v| match &v.kind {
+            ViolationKind::LayerInversion {
+                from_module: _,
+                to_class,
+                ..
+            } => {
+                // from_module is the module; the src node id is "from_module.<class_name>"
+                // We stored the message as "from_module.ClassName -> to_class", so parse from message.
+                let src = v.message.split(" -> ").next()?.to_string();
+                Some((src, to_class.clone()))
+            }
+            ViolationKind::CrossAdapterCoupling {
+                from_class,
+                to_class,
+                ..
+            } => Some((from_class.clone(), to_class.clone())),
+            ViolationKind::HighFanIn { .. } => None,
+        })
+        .collect()
+}
+
+fn inspect_to_dot(
+    result: &py_analyzer::InspectResult,
+    violated_edges: &std::collections::HashSet<(String, String)>,
+) -> String {
     use std::collections::{HashMap, HashSet};
     use std::fmt::Write as _;
 
@@ -242,7 +300,12 @@ fn inspect_to_dot(result: &py_analyzer::InspectResult) -> String {
                 .iter()
                 .any(|b| b.split('.').next_back().unwrap_or(b.as_str()) == dep.as_str());
             if !is_base && let Some(dep_id) = class_node_id.get(dep.as_str()) {
-                writeln!(out, "    \"{src_id}\" -> \"{dep_id}\" [label=\"uses\"];").unwrap();
+                let attrs = if violated_edges.contains(&(src_id.clone(), dep_id.clone())) {
+                    r#"[color=red, style=bold, label="VIOLATION"]"#
+                } else {
+                    r#"[label="uses"]"#
+                };
+                writeln!(out, "    \"{src_id}\" -> \"{dep_id}\" {attrs};").unwrap();
             }
         }
     }

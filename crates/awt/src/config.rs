@@ -15,6 +15,7 @@ pub struct Config {
     pub include_dirs: Vec<String>,
     pub operators: OperatorConfig,
     pub fitness: FitnessConfig,
+    pub graph_analysis: graph_analysis::GraphLayerConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +40,7 @@ impl Default for Config {
             include_dirs: vec!["src".into()],
             operators: OperatorConfig::default(),
             fitness: FitnessConfig::default(),
+            graph_analysis: graph_analysis::GraphLayerConfig::default(),
         }
     }
 }
@@ -144,6 +146,23 @@ mod tests {
     fn test_fitness_config_default_should_have_all_rules_enabled() {
         let cfg = FitnessConfig::default();
         assert!(cfg.adp.enabled && cfg.sdp.enabled && cfg.main_sequence.enabled);
+    }
+
+    #[test]
+    fn test_graph_analysis_config_from_toml_should_parse_layers() {
+        let toml = r#"
+[[graph_analysis.layers]]
+name = "domain"
+module_prefixes = ["domain"]
+
+[[graph_analysis.layers]]
+name = "infra"
+module_prefixes = ["feature.postgres_repo", "feature.local_file_repo"]
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.graph_analysis.layers.len(), 2);
+        assert_eq!(cfg.graph_analysis.layers[0].name, "domain");
+        assert_eq!(cfg.graph_analysis.layers[1].module_prefixes.len(), 2);
     }
 
     #[test]
