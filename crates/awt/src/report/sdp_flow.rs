@@ -335,8 +335,45 @@ mod tests {
     use crate::graph::abstractness::AbstractnessMap;
     use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode};
     use crate::graph::metrics;
+    use crate::model::{
+        Candidate, CandidateKind, FailureCategory, FailureEvent, FailureScope, MutantId,
+        MutantResult, MutantStatus, OperatorKind, VerifierKind,
+    };
     use camino::Utf8PathBuf;
     use tempfile::NamedTempFile;
+
+    fn make_result(src: &str, affected: &[&str]) -> MutantResult {
+        let candidate = Candidate {
+            id: MutantId::new(src, "fn", "add_required_parameter"),
+            file: Utf8PathBuf::from(src),
+            symbol: "fn".into(),
+            kind: CandidateKind::Function,
+            operator: OperatorKind::AddRequiredParameter,
+            line: 1,
+            byte_start: 0,
+            byte_end: 1,
+        };
+        let external_failures = affected
+            .iter()
+            .map(|f| FailureEvent {
+                mutant_id: candidate.id.clone(),
+                command: VerifierKind::Pytest,
+                file: Utf8PathBuf::from(*f),
+                line: None,
+                column: None,
+                symbol: None,
+                category: FailureCategory::TestAssertion,
+                message: "fail".into(),
+                scope: FailureScope::External,
+            })
+            .collect();
+        MutantResult {
+            candidate,
+            status: MutantStatus::Breaks,
+            local_failures: vec![],
+            external_failures,
+        }
+    }
 
     fn stub_metrics(idx: &GraphIndex) -> MetricsResult {
         metrics::compute(
@@ -348,34 +385,14 @@ mod tests {
     }
 
     fn source_source_graph(src: &str, dst: &str) -> GraphIndex {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        let src_name = std::path::Path::new(src).file_name().unwrap();
-        let dst_name = std::path::Path::new(dst).file_name().unwrap();
-        let import_stem = dst_name
-            .to_str()
-            .unwrap()
-            .strip_suffix(".py")
-            .unwrap_or(dst_name.to_str().unwrap());
-        std::fs::write(root.join(src_name), format!("import {import_stem}\n")).unwrap();
-        std::fs::write(root.join(dst_name), b"").unwrap();
-        let files = vec![
-            Utf8PathBuf::from(src_name.to_str().unwrap()),
-            Utf8PathBuf::from(dst_name.to_str().unwrap()),
-        ];
-        GraphIndex::build_from_source_imports(&files, root)
+        GraphIndex::build(&[make_result(src, &[dst])], &[])
     }
 
     fn source_test_graph() -> GraphIndex {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("domain.py"), b"").unwrap();
-        std::fs::write(root.join("test_domain.py"), b"import domain\n").unwrap();
-        let files = vec![
-            Utf8PathBuf::from("domain.py"),
-            Utf8PathBuf::from("test_domain.py"),
-        ];
-        GraphIndex::build_from_source_imports(&files, root)
+        GraphIndex::build(
+            &[make_result("src/domain.py", &["tests/test_domain.py"])],
+            &[],
+        )
     }
 
     fn make_large_graph(n: usize) -> (GraphIndex, MetricsResult) {
@@ -470,8 +487,7 @@ mod tests {
     fn test_write_sdp_flow_with_no_edges_should_produce_valid_empty_chart() {
         let tmp = NamedTempFile::with_suffix(".png").unwrap();
         let path = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let idx = GraphIndex::build_from_source_imports(&[], dir.path());
+        let idx = GraphIndex::build(&[], &[]);
         let m = stub_metrics(&idx);
         let result = write_sdp_flow(&idx, &m, path.as_path());
         assert!(result.is_ok());

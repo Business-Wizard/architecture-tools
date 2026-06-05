@@ -97,7 +97,44 @@ mod tests {
     use crate::graph::abstractness::AbstractnessMap;
     use crate::graph::coupling_graph::GraphIndex;
     use crate::graph::metrics;
+    use crate::model::{
+        Candidate, CandidateKind, FailureCategory, FailureEvent, FailureScope, MutantId,
+        MutantResult, MutantStatus, OperatorKind, VerifierKind,
+    };
     use camino::Utf8PathBuf;
+
+    fn make_result(src: &str, affected: &[&str]) -> MutantResult {
+        let candidate = Candidate {
+            id: MutantId::new(src, "fn", "add_required_parameter"),
+            file: Utf8PathBuf::from(src),
+            symbol: "fn".into(),
+            kind: CandidateKind::Function,
+            operator: OperatorKind::AddRequiredParameter,
+            line: 1,
+            byte_start: 0,
+            byte_end: 1,
+        };
+        let external_failures = affected
+            .iter()
+            .map(|f| FailureEvent {
+                mutant_id: candidate.id.clone(),
+                command: VerifierKind::Pytest,
+                file: Utf8PathBuf::from(*f),
+                line: None,
+                column: None,
+                symbol: None,
+                category: FailureCategory::TestAssertion,
+                message: "fail".into(),
+                scope: FailureScope::External,
+            })
+            .collect();
+        MutantResult {
+            candidate,
+            status: MutantStatus::Breaks,
+            local_failures: vec![],
+            external_failures,
+        }
+    }
 
     fn stub_metrics(idx: &GraphIndex) -> MetricsResult {
         metrics::compute(
@@ -109,27 +146,14 @@ mod tests {
     }
 
     fn fixture_source_only() -> GraphIndex {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("domain.py"), b"import service\n").unwrap();
-        std::fs::write(root.join("service.py"), b"").unwrap();
-        let files = vec![
-            Utf8PathBuf::from("domain.py"),
-            Utf8PathBuf::from("service.py"),
-        ];
-        GraphIndex::build_from_source_imports(&files, root)
+        GraphIndex::build(&[make_result("src/domain.py", &["src/service.py"])], &[])
     }
 
     fn fixture_source_to_test() -> GraphIndex {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("domain.py"), b"").unwrap();
-        std::fs::write(root.join("test_domain.py"), b"import domain\n").unwrap();
-        let files = vec![
-            Utf8PathBuf::from("domain.py"),
-            Utf8PathBuf::from("test_domain.py"),
-        ];
-        GraphIndex::build_from_source_imports(&files, root)
+        GraphIndex::build(
+            &[make_result("src/domain.py", &["tests/test_domain.py"])],
+            &[],
+        )
     }
 
     #[test]
@@ -137,8 +161,8 @@ mod tests {
         let idx = fixture_source_only();
         let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("digraph coupling {"));
-        assert!(dot.contains("domain.py"));
-        assert!(dot.contains("service.py"));
+        assert!(dot.contains("src/domain.py"));
+        assert!(dot.contains("src/service.py"));
         assert!(dot.contains("->"));
     }
 
@@ -172,12 +196,11 @@ mod tests {
 
     #[test]
     fn test_cycle_nodes_should_get_lightcoral_fill() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("a.py"), b"import b\n").unwrap();
-        std::fs::write(root.join("b.py"), b"import a\n").unwrap();
-        let files = vec![Utf8PathBuf::from("a.py"), Utf8PathBuf::from("b.py")];
-        let idx = GraphIndex::build_from_source_imports(&files, root);
+        let results = vec![
+            make_result("src/a.py", &["src/b.py"]),
+            make_result("src/b.py", &["src/a.py"]),
+        ];
+        let idx = GraphIndex::build(&results, &[]);
         let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("lightcoral"));
     }

@@ -234,9 +234,13 @@ mod tests {
         NodeMetrics {
             file: Utf8PathBuf::from("src/x.py"),
             role,
+            fan_in: 1,
+            fan_out: 1,
             instability: i,
             abstractness,
             distance,
+            distance_warning: distance > 0.3,
+            distance_failure: distance > 0.5,
         }
     }
 

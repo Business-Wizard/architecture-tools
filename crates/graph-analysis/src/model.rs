@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GraphRuleId {
-    CyclicDependency,
-    ModuleHub,
-    GodModule,
+    LayerInversion,
+    CrossAdapterCoupling,
+    HighFanIn,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,17 +15,23 @@ pub enum GraphSeverity {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViolationKind {
-    CyclicDependency {
-        modules: Vec<String>,
+    LayerInversion {
+        from_module: String,
+        to_class: String,
+        from_layer: String,
+        to_layer: String,
+        fix_hint: String,
     },
-    ModuleHub {
-        module: String,
+    CrossAdapterCoupling {
+        from_class: String,
+        to_class: String,
+        from_adapter: String,
+        to_adapter: String,
+        fix_hint: String,
+    },
+    HighFanIn {
+        class: String,
         fan_in: usize,
-        threshold: usize,
-    },
-    GodModule {
-        module: String,
-        fan_out: usize,
         threshold: usize,
     },
 }

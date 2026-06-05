@@ -2,27 +2,33 @@
 name = "awt"
 version = "0.1.0"
 edition = "2024"
-description = "Architecture Wind Tunnel — static graph analysis for Python codebases."
+description = "Architecture Wind Tunnel — mutation-based coupling analysis for Python codebases."
 license = "AGPL-3.0-or-later"
 authors = ["Better Bearings"]
 
 [dependencies]
 architecture-core = { path = "../architecture-core" }
 graph-analysis = { path = "../graph-analysis" }
+mutation-test = { path = "../mutation-test" }
 py-analyzer = { path = "../py-analyzer" }
+anyhow = "1.0"
+thiserror = "2.0"
 clap = { version = "4", features = ["derive"] }
-camino = { version = "1", features = ["serde1"] }
-ignore = "0.4"
-tree-sitter = "0.25"
-tree-sitter-python = "0.23"
-petgraph = "0.7"
-plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "line_series", "ttf"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
-colored = "3"
 tempfile = "3"
+ignore = "0.4"
+camino = { version = "1", features = ["serde1"] }
+tree-sitter = "0.25"
+tree-sitter-python = "0.23"
+petgraph = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "process", "sync", "macros", "time"] }
 comfy-table = "7"
+indicatif = "0.17"
+colored = "3"
+sha2 = "0.10"
+plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "line_series", "ttf"] }
 
 [lints]
 workspace = true

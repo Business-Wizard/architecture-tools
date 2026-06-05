@@ -39,9 +39,13 @@ pub fn violates_sdp(dependency: Dependency, depender: Depender) -> bool {
 pub struct NodeMetrics {
     pub file: Utf8PathBuf,
     pub role: FileRole,
+    pub fan_in: usize,
+    pub fan_out: usize,
     pub instability: Instability,
     pub abstractness: f64,
     pub distance: f64,
+    pub distance_warning: bool,
+    pub distance_failure: bool,
 }
 
 #[derive(Debug)]
@@ -78,13 +82,19 @@ pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResul
                 .unwrap_or(0.0);
 
             let distance = (abstractness + instability.as_f64() - 1.0).abs();
+            let distance_warning = distance > 0.3;
+            let distance_failure = distance > 0.5;
 
             NodeMetrics {
                 file: node.path.clone(),
                 role: node.role.clone(),
+                fan_in,
+                fan_out,
                 instability,
                 abstractness,
                 distance,
+                distance_warning,
+                distance_failure,
             }
         })
         .collect();
@@ -209,6 +219,42 @@ mod tests {
             .expect("node should exist");
 
         assert_eq!(balanced.instability, Instability::new(0.5));
+    }
+
+    #[test]
+    fn test_distance_warning_threshold_should_be_above_point_three() {
+        let metrics = NodeMetrics {
+            file: Utf8PathBuf::from("src/test.py"),
+            role: FileRole::Source,
+            fan_in: 1,
+            fan_out: 1,
+            instability: Instability::new(0.5),
+            abstractness: 0.0,
+            distance: 0.4,
+            distance_warning: true,
+            distance_failure: false,
+        };
+
+        assert!(metrics.distance_warning);
+        assert!(!metrics.distance_failure);
+    }
+
+    #[test]
+    fn test_distance_failure_threshold_should_be_above_point_five() {
+        let metrics = NodeMetrics {
+            file: Utf8PathBuf::from("src/test.py"),
+            role: FileRole::Source,
+            fan_in: 1,
+            fan_out: 1,
+            instability: Instability::new(0.5),
+            abstractness: 0.0,
+            distance: 0.6,
+            distance_warning: true,
+            distance_failure: true,
+        };
+
+        assert!(metrics.distance_warning);
+        assert!(metrics.distance_failure);
     }
 
     #[test]
