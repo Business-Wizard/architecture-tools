@@ -1,5 +1,7 @@
 use crate::model::{Candidate, MutationError};
 
+/// # Errors
+/// Returns `MutationError::OutOfBounds` if the byte range exceeds the source length.
 pub fn apply(source: &[u8], candidate: &Candidate) -> Result<Vec<u8>, MutationError> {
     let start = candidate.byte_start;
     let end = candidate.byte_end;

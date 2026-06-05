@@ -133,12 +133,8 @@ pub fn run() {
 }
 
 fn run_inspect_command(args: &InspectArgs) {
-    let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
     let timeout = std::time::Duration::from_secs(args.timeout_secs);
-    let result = rt.block_on(py_analyzer::inspect_with_timeout(
-        args.path.as_std_path(),
-        timeout,
-    ));
+    let result = py_analyzer::inspect_with_timeout(args.path.as_std_path(), timeout);
     match result {
         Ok(inspect) => {
             let dot = inspect_to_dot(&inspect);

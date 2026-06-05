@@ -8,6 +8,7 @@ use thiserror::Error;
 pub struct MutantId(pub String);
 
 impl MutantId {
+    #[must_use]
     pub fn new(file: &str, symbol: &str, operator: &str) -> Self {
         Self(format!("{file}::{symbol}::{operator}"))
     }
@@ -55,6 +56,7 @@ impl std::fmt::Display for OperatorKind {
 }
 
 impl OperatorKind {
+    #[must_use]
     pub fn short_name(&self) -> &'static str {
         match self {
             Self::AddRequiredParameter => "+param",

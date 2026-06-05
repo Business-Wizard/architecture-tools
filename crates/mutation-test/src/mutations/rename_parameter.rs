@@ -2,6 +2,8 @@ use crate::model::{Candidate, MutationError};
 
 const RENAME_PREFIX: &str = "awt_renamed_";
 
+/// # Errors
+/// Returns `MutationError::OutOfBounds` if the byte range is invalid, the source is not valid UTF-8, or no renameable parameter is found.
 pub fn apply(source: &[u8], candidate: &Candidate) -> Result<Vec<u8>, MutationError> {
     let start = candidate.byte_start;
     let end = candidate.byte_end;

@@ -4,6 +4,8 @@ use crate::model::MutationError;
 
 const MOVED_DIR: &str = "_awt_moved";
 
+/// # Errors
+/// Returns `MutationError` if the path has no filename, or if filesystem operations fail.
 pub fn apply(repo_root: &Path, rel_path: &str) -> Result<(), MutationError> {
     let source = repo_root.join(rel_path);
 

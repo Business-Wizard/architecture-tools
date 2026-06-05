@@ -25,7 +25,7 @@ pub fn inspect(package_path: &Path) -> Result<InspectResult, InspectorError> {
 ///
 /// # Errors
 /// Returns `InspectorError` if file I/O or parsing fails.
-pub async fn inspect_with_timeout(
+pub fn inspect_with_timeout(
     package_path: &Path,
     _timeout: Duration,
 ) -> Result<InspectResult, InspectorError> {
