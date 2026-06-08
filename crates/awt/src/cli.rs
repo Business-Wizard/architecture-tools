@@ -123,7 +123,7 @@ fn run_inspect_command(args: &InspectArgs) {
             }
 
             match object_analyzer.object_defs(args.path.as_std_path()) {
-                Ok(class_defs) => {
+                Ok(class_defs) if !class_defs.is_empty() => {
                     let obj_idx = ObjectGraphIndex::build_from_class_defs(&class_defs);
                     let cycle_modules = dot::cycle_module_names(&graph_idx);
                     if let Err(e) = objects_dot::write_objects_dot(
@@ -134,6 +134,7 @@ fn run_inspect_command(args: &InspectArgs) {
                         eprintln!("warning: could not write objects dot output: {e}");
                     }
                 }
+                Ok(_) => {}
                 Err(e) => eprintln!("warning: could not extract object definitions: {e}"),
             }
 
