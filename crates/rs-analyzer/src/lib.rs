@@ -1,5 +1,6 @@
 mod error;
 mod rust_imports;
+mod rust_objects;
 
 pub use error::InspectorError;
 
@@ -20,9 +21,10 @@ impl lang_core::LanguageAnalyzer for RustAnalyzer {
 impl lang_core::ObjectAnalyzer for RustAnalyzer {
     fn object_defs(
         &self,
-        _path: &Path,
+        path: &Path,
     ) -> Result<Vec<lang_core::ClassDef>, Box<dyn std::error::Error + Send + Sync>> {
-        Ok(vec![])
+        rust_objects::extract(path)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 }
 
