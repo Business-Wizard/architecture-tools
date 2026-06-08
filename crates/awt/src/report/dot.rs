@@ -51,8 +51,16 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
         let node = &idx.graph[n];
         let i = instability_map.get(&node.path).copied().unwrap_or(0.0);
         let label = format!("{}\\nI={:.2}", node.path.as_str().replace('"', "\\\""), i);
+        let is_isolated = idx.graph.edges(n).count() == 0
+            && idx
+                .graph
+                .edges_directed(n, petgraph::Direction::Incoming)
+                .count()
+                == 0;
         let attrs = if cycles.contains(&n) {
             "shape=box style=filled fillcolor=lightcoral"
+        } else if is_isolated {
+            "shape=box style=filled fillcolor=yellow"
         } else {
             "shape=box"
         };
@@ -118,7 +126,7 @@ mod tests {
             from: "domain".into(),
             to: "service".into(),
         }];
-        GraphIndex::build_from_module_deps(&deps, &files)
+        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
     /// test_domain.py imports domain.py — test node should be excluded from output
@@ -131,7 +139,7 @@ mod tests {
             from: "test_domain".into(),
             to: "domain".into(),
         }];
-        GraphIndex::build_from_module_deps(&deps, &files)
+        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
     /// a.py and b.py mutually import each other → cycle
@@ -147,7 +155,7 @@ mod tests {
                 to: "a".into(),
             },
         ];
-        GraphIndex::build_from_module_deps(&deps, &files)
+        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
     /// balanced.py imports domain.py; service.py imports balanced.py
@@ -168,7 +176,7 @@ mod tests {
                 to: "balanced".into(),
             },
         ];
-        GraphIndex::build_from_module_deps(&deps, &files)
+        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
     /// hub.py imported by a, b, c; hub imports x, y
@@ -204,7 +212,7 @@ mod tests {
                 to: "hub".into(),
             },
         ];
-        GraphIndex::build_from_module_deps(&deps, &files)
+        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
     /// mid.py imported by consumer; mid imports x, y
@@ -230,7 +238,7 @@ mod tests {
                 to: "mid".into(),
             },
         ];
-        GraphIndex::build_from_module_deps(&deps, &files)
+        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
     /// consumer imports hub 4 times (e.g. different named imports resolving to same file)
@@ -258,7 +266,7 @@ mod tests {
                 to: "hub".into(),
             },
         ];
-        GraphIndex::build_from_module_deps(&deps, &files)
+        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
     // ── penwidth ─────────────────────────────────────────────────────────────
@@ -285,7 +293,7 @@ mod tests {
         std::fs::write(root.join("a.py"), b"import b\n").unwrap();
         std::fs::write(root.join("b.py"), b"import a\n").unwrap();
         let files = vec![Utf8PathBuf::from("a.py"), Utf8PathBuf::from("b.py")];
-        let idx = GraphIndex::build_from_source_imports(&files, root);
+        let idx = GraphIndex::build_from_source_imports(&files, root, &py_analyzer::PythonAnalyzer);
         let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("color=crimson"));
     }
@@ -434,6 +442,35 @@ mod tests {
         assert!(!dot.contains("->"));
     }
 
+    // ── isolated nodes ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_render_isolated_source_node_should_get_yellow_fill() {
+        // orphan.py has no deps and nothing imports it.
+        let files = vec![
+            Utf8PathBuf::from("domain.py"),
+            Utf8PathBuf::from("service.py"),
+            Utf8PathBuf::from("orphan.py"),
+        ];
+        let deps = vec![ModuleDep {
+            from: "domain".into(),
+            to: "service".into(),
+        }];
+        let idx = GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer);
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(
+            dot.contains("fillcolor=yellow"),
+            "orphan node should be yellow:\n{dot}"
+        );
+    }
+
+    #[test]
+    fn test_render_connected_node_should_not_get_yellow_fill() {
+        let idx = fixture_one_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(!dot.contains("fillcolor=yellow"));
+    }
+
     // ── cycle detection ──────────────────────────────────────────────────────
 
     #[test]
@@ -462,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_render_empty_graph_should_produce_valid_dot() {
-        let idx = GraphIndex::build_from_module_deps(&[], &[]);
+        let idx = GraphIndex::build_from_module_deps(&[], &[], &py_analyzer::PythonAnalyzer);
         let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.starts_with("digraph coupling {"));
         assert!(dot.trim_end().ends_with('}'));

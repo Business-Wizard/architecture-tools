@@ -15,6 +15,7 @@ impl FileRole {
         if s.contains("/tests/")
             || s.contains("/test_")
             || s.ends_with("_test.py")
+            || s.ends_with("_test.rs")
             || s.starts_with("tests/")
             || s.starts_with("test_")
         {
@@ -80,24 +81,17 @@ fn resolve_module<'a>(
     }
 }
 
-fn build_module_map(source_files: &[Utf8PathBuf]) -> HashMap<String, Utf8PathBuf> {
+fn build_module_map(
+    source_files: &[Utf8PathBuf],
+    namer: &dyn lang_core::ModuleNamer,
+) -> HashMap<String, Utf8PathBuf> {
     let mut map = HashMap::new();
     for file in source_files {
-        let s = file.as_str();
-        let without_ext = s.strip_suffix(".py").unwrap_or(s);
-        let is_init = without_ext.ends_with("/__init__") || without_ext == "__init__";
-        let dotted = if is_init {
-            without_ext
-                .strip_suffix("/__init__")
-                .unwrap_or(without_ext)
-                .replace('/', ".")
-        } else {
-            without_ext.replace('/', ".")
-        };
+        let dotted = namer.path_to_module_name(std::path::Path::new(file.as_str()));
         let parts: Vec<&str> = dotted.split('.').collect();
         for start in 0..parts.len() {
-            let suffix = parts[start..].join(".");
-            map.entry(suffix).or_insert_with(|| file.clone());
+            map.entry(parts[start..].join("."))
+                .or_insert_with(|| file.clone());
         }
     }
     map
@@ -107,10 +101,16 @@ impl GraphIndex {
     pub fn build_from_module_deps(
         deps: &[lang_core::ModuleDep],
         source_files: &[Utf8PathBuf],
+        namer: &dyn lang_core::ModuleNamer,
     ) -> Self {
-        let module_map = build_module_map(source_files);
+        let module_map = build_module_map(source_files, namer);
         let mut graph = CouplingGraph::new();
         let mut node_map: HashMap<Utf8PathBuf, NodeIndex> = HashMap::new();
+
+        // Seed all source files so isolated nodes (no edges) appear in the graph.
+        for file in source_files {
+            get_or_insert_node(&mut graph, &mut node_map, file.clone());
+        }
 
         for dep in deps {
             // dep.from imports dep.to → edge: dep.to (dependency) → dep.from (importer/depender)
@@ -139,8 +139,9 @@ impl GraphIndex {
     pub fn build_from_source_imports(
         source_files: &[Utf8PathBuf],
         repo_root: &std::path::Path,
+        namer: &dyn lang_core::ModuleNamer,
     ) -> Self {
-        let module_map = build_module_map(source_files);
+        let module_map = build_module_map(source_files, namer);
         let mut graph = CouplingGraph::new();
         let mut node_map: HashMap<Utf8PathBuf, NodeIndex> = HashMap::new();
 
@@ -182,6 +183,10 @@ impl GraphIndex {
 mod tests {
     use super::*;
 
+    fn python_namer() -> py_analyzer::PythonAnalyzer {
+        py_analyzer::PythonAnalyzer
+    }
+
     #[test]
     fn test_is_test_file_with_tests_directory_should_return_true() {
         let actual = FileRole::from_path(&Utf8PathBuf::from("src/tests/helper.py"));
@@ -201,6 +206,12 @@ mod tests {
     }
 
     #[test]
+    fn test_is_test_file_with_underscore_test_rs_suffix_should_return_true() {
+        let actual = FileRole::from_path(&Utf8PathBuf::from("src/order_test.rs"));
+        assert_eq!(actual, FileRole::Test);
+    }
+
+    #[test]
     fn test_is_test_file_with_top_level_tests_prefix_should_return_true() {
         let actual = FileRole::from_path(&Utf8PathBuf::from("tests/test_order.py"));
         assert_eq!(actual, FileRole::Test);
@@ -215,7 +226,7 @@ mod tests {
     #[test]
     fn test_build_module_map_should_include_all_dotted_suffixes() {
         let files = vec![Utf8PathBuf::from("src/domain/order.py")];
-        let map = build_module_map(&files);
+        let map = build_module_map(&files, &python_namer());
         assert_eq!(
             map.get("src.domain.order"),
             Some(&Utf8PathBuf::from("src/domain/order.py"))
@@ -233,7 +244,7 @@ mod tests {
     #[test]
     fn test_build_module_map_init_file_should_map_to_package_name() {
         let files = vec![Utf8PathBuf::from("src/domain/__init__.py")];
-        let map = build_module_map(&files);
+        let map = build_module_map(&files, &python_namer());
         assert_eq!(
             map.get("src.domain"),
             Some(&Utf8PathBuf::from("src/domain/__init__.py"))
@@ -257,7 +268,7 @@ mod tests {
             Utf8PathBuf::from("order.py"),
             Utf8PathBuf::from("billing.py"),
         ];
-        let idx = GraphIndex::build_from_source_imports(&files, root);
+        let idx = GraphIndex::build_from_source_imports(&files, root, &python_namer());
 
         assert_eq!(idx.graph.edge_count(), 1);
         let edge = idx.graph.edge_indices().next().unwrap();
@@ -273,7 +284,7 @@ mod tests {
         std::fs::write(root.join("order.py"), b"import order\n").unwrap();
 
         let files = vec![Utf8PathBuf::from("order.py")];
-        let idx = GraphIndex::build_from_source_imports(&files, root);
+        let idx = GraphIndex::build_from_source_imports(&files, root, &python_namer());
 
         assert_eq!(idx.graph.edge_count(), 0);
     }
@@ -285,7 +296,7 @@ mod tests {
         std::fs::write(root.join("order.py"), b"import requests\nimport os\n").unwrap();
 
         let files = vec![Utf8PathBuf::from("order.py")];
-        let idx = GraphIndex::build_from_source_imports(&files, root);
+        let idx = GraphIndex::build_from_source_imports(&files, root, &python_namer());
 
         assert_eq!(idx.graph.edge_count(), 0);
     }
@@ -298,10 +309,10 @@ mod tests {
             Utf8PathBuf::from("billing.py"),
         ];
         let deps = vec![lang_core::ModuleDep {
-            from: "order".to_string(),
-            to: "billing".to_string(),
+            from: "order".into(),
+            to: "billing".into(),
         }];
-        let idx = GraphIndex::build_from_module_deps(&deps, &files);
+        let idx = GraphIndex::build_from_module_deps(&deps, &files, &python_namer());
 
         assert_eq!(idx.graph.edge_count(), 1);
         let edge = idx.graph.edge_indices().next().unwrap();
@@ -314,10 +325,10 @@ mod tests {
     fn test_build_from_module_deps_should_skip_third_party_deps() {
         let files = vec![Utf8PathBuf::from("order.py")];
         let deps = vec![lang_core::ModuleDep {
-            from: "order".to_string(),
-            to: "requests".to_string(),
+            from: "order".into(),
+            to: "requests".into(),
         }];
-        let idx = GraphIndex::build_from_module_deps(&deps, &files);
+        let idx = GraphIndex::build_from_module_deps(&deps, &files, &python_namer());
         assert_eq!(idx.graph.edge_count(), 0);
     }
 
@@ -325,10 +336,10 @@ mod tests {
     fn test_build_from_module_deps_should_not_add_self_edges() {
         let files = vec![Utf8PathBuf::from("order.py")];
         let deps = vec![lang_core::ModuleDep {
-            from: "order".to_string(),
-            to: "order".to_string(),
+            from: "order".into(),
+            to: "order".into(),
         }];
-        let idx = GraphIndex::build_from_module_deps(&deps, &files);
+        let idx = GraphIndex::build_from_module_deps(&deps, &files, &python_namer());
         assert_eq!(idx.graph.edge_count(), 0);
     }
 }
