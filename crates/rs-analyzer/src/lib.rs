@@ -17,6 +17,15 @@ impl lang_core::LanguageAnalyzer for RustAnalyzer {
     }
 }
 
+impl lang_core::ObjectAnalyzer for RustAnalyzer {
+    fn object_defs(
+        &self,
+        _path: &Path,
+    ) -> Result<Vec<lang_core::ClassDef>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(vec![])
+    }
+}
+
 impl lang_core::ModuleNamer for RustAnalyzer {
     fn file_extension(&self) -> lang_core::FileExtension {
         lang_core::FileExtension("rs")

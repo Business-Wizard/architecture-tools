@@ -20,6 +20,17 @@ impl lang_core::LanguageAnalyzer for PythonAnalyzer {
     }
 }
 
+impl lang_core::ObjectAnalyzer for PythonAnalyzer {
+    fn object_defs(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<lang_core::ClassDef>, Box<dyn std::error::Error + Send + Sync>> {
+        let (_module_deps, classes) = python_imports::extract(path)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        Ok(classes)
+    }
+}
+
 impl lang_core::ModuleNamer for PythonAnalyzer {
     fn file_extension(&self) -> lang_core::FileExtension {
         lang_core::FileExtension("py")
