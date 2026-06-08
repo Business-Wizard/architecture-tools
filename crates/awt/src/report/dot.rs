@@ -100,6 +100,7 @@ mod tests {
     use crate::graph::coupling_graph::GraphIndex;
     use crate::graph::metrics;
     use camino::Utf8PathBuf;
+    use py_analyzer::ModuleDep;
 
     fn stub_metrics(idx: &GraphIndex) -> MetricsResult {
         metrics::compute(
@@ -110,78 +111,189 @@ mod tests {
         )
     }
 
-    fn fixture_source_only() -> GraphIndex {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("domain.py"), b"import service\n").unwrap();
-        std::fs::write(root.join("service.py"), b"").unwrap();
+    fn node_index_in_dot(dot: &str, filename: &str) -> Option<usize> {
+        for line in dot.lines() {
+            let trimmed = line.trim();
+            if trimmed.contains(&format!("label=\"{filename}")) {
+                return trimmed
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse().ok());
+            }
+        }
+        None
+    }
+
+    /// domain.py imports service.py
+    /// service: fan_in=1, fan_out=0 → I=0.00 (stable)
+    /// domain:  fan_in=0, fan_out=1 → I=1.00 (unstable)
+    fn fixture_one_import() -> GraphIndex {
         let files = vec![
             Utf8PathBuf::from("domain.py"),
             Utf8PathBuf::from("service.py"),
         ];
-        GraphIndex::build_from_source_imports(&files, root)
+        let deps = vec![ModuleDep {
+            from: "domain".into(),
+            to: "service".into(),
+        }];
+        GraphIndex::build_from_module_deps(&deps, &files)
     }
 
-    fn fixture_source_to_test() -> GraphIndex {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("domain.py"), b"").unwrap();
-        std::fs::write(root.join("test_domain.py"), b"import domain\n").unwrap();
+    /// test_domain.py imports domain.py — test node should be excluded from output
+    fn fixture_test_imports_source() -> GraphIndex {
         let files = vec![
             Utf8PathBuf::from("domain.py"),
             Utf8PathBuf::from("test_domain.py"),
         ];
-        GraphIndex::build_from_source_imports(&files, root)
+        let deps = vec![ModuleDep {
+            from: "test_domain".into(),
+            to: "domain".into(),
+        }];
+        GraphIndex::build_from_module_deps(&deps, &files)
     }
 
-    #[test]
-    fn test_render_should_produce_valid_dot_with_source_nodes_and_edges() {
-        let idx = fixture_source_only();
-        let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains("digraph coupling {"));
-        assert!(dot.contains("domain.py"));
-        assert!(dot.contains("service.py"));
-        assert!(dot.contains("->"));
-    }
-
-    #[test]
-    fn test_render_should_exclude_test_nodes_from_dot() {
-        let idx = fixture_source_to_test();
-        let dot = render(&idx, &stub_metrics(&idx));
-        assert!(!dot.contains("tests/test_domain.py"));
-    }
-
-    #[test]
-    fn test_render_should_exclude_edges_to_test_nodes() {
-        let idx = fixture_source_to_test();
-        let dot = render(&idx, &stub_metrics(&idx));
-        assert!(!dot.contains("->"));
-    }
-
-    #[test]
-    fn test_source_file_should_use_box_shape() {
-        let idx = fixture_source_only();
-        let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains("shape=box"));
-    }
-
-    #[test]
-    fn test_edge_should_have_penwidth() {
-        let idx = fixture_source_only();
-        let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains("penwidth="));
-    }
-
-    #[test]
-    fn test_cycle_nodes_should_get_lightcoral_fill() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("a.py"), b"import b\n").unwrap();
-        std::fs::write(root.join("b.py"), b"import a\n").unwrap();
+    /// a.py and b.py mutually import each other → cycle
+    fn fixture_cycle() -> GraphIndex {
         let files = vec![Utf8PathBuf::from("a.py"), Utf8PathBuf::from("b.py")];
-        let idx = GraphIndex::build_from_source_imports(&files, root);
-        let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains("lightcoral"));
+        let deps = vec![
+            ModuleDep {
+                from: "a".into(),
+                to: "b".into(),
+            },
+            ModuleDep {
+                from: "b".into(),
+                to: "a".into(),
+            },
+        ];
+        GraphIndex::build_from_module_deps(&deps, &files)
+    }
+
+    /// balanced.py imports domain.py; service.py imports balanced.py
+    /// balanced: fan_in=1, fan_out=1 → I=0.50
+    fn fixture_balanced_node() -> GraphIndex {
+        let files = vec![
+            Utf8PathBuf::from("domain.py"),
+            Utf8PathBuf::from("balanced.py"),
+            Utf8PathBuf::from("service.py"),
+        ];
+        let deps = vec![
+            ModuleDep {
+                from: "balanced".into(),
+                to: "domain".into(),
+            },
+            ModuleDep {
+                from: "service".into(),
+                to: "balanced".into(),
+            },
+        ];
+        GraphIndex::build_from_module_deps(&deps, &files)
+    }
+
+    /// hub.py imported by a, b, c; hub imports x, y
+    /// hub: fan_in=3, fan_out=2 → I=2/5=0.40
+    fn fixture_hub_node() -> GraphIndex {
+        let files = vec![
+            Utf8PathBuf::from("x.py"),
+            Utf8PathBuf::from("y.py"),
+            Utf8PathBuf::from("hub.py"),
+            Utf8PathBuf::from("a.py"),
+            Utf8PathBuf::from("b.py"),
+            Utf8PathBuf::from("c.py"),
+        ];
+        let deps = vec![
+            ModuleDep {
+                from: "hub".into(),
+                to: "x".into(),
+            },
+            ModuleDep {
+                from: "hub".into(),
+                to: "y".into(),
+            },
+            ModuleDep {
+                from: "a".into(),
+                to: "hub".into(),
+            },
+            ModuleDep {
+                from: "b".into(),
+                to: "hub".into(),
+            },
+            ModuleDep {
+                from: "c".into(),
+                to: "hub".into(),
+            },
+        ];
+        GraphIndex::build_from_module_deps(&deps, &files)
+    }
+
+    /// mid.py imported by consumer; mid imports x, y
+    /// mid: fan_in=1, fan_out=2 → I=2/3≈0.67
+    fn fixture_mid_node() -> GraphIndex {
+        let files = vec![
+            Utf8PathBuf::from("x.py"),
+            Utf8PathBuf::from("y.py"),
+            Utf8PathBuf::from("mid.py"),
+            Utf8PathBuf::from("consumer.py"),
+        ];
+        let deps = vec![
+            ModuleDep {
+                from: "mid".into(),
+                to: "x".into(),
+            },
+            ModuleDep {
+                from: "mid".into(),
+                to: "y".into(),
+            },
+            ModuleDep {
+                from: "consumer".into(),
+                to: "mid".into(),
+            },
+        ];
+        GraphIndex::build_from_module_deps(&deps, &files)
+    }
+
+    /// consumer imports hub 4 times (e.g. different named imports resolving to same file)
+    /// edge count=4 → penwidth = 1.0 + sqrt(4) = 3.00
+    fn fixture_repeated_import() -> GraphIndex {
+        let files = vec![
+            Utf8PathBuf::from("hub.py"),
+            Utf8PathBuf::from("consumer.py"),
+        ];
+        let deps = vec![
+            ModuleDep {
+                from: "consumer".into(),
+                to: "hub".into(),
+            },
+            ModuleDep {
+                from: "consumer".into(),
+                to: "hub".into(),
+            },
+            ModuleDep {
+                from: "consumer".into(),
+                to: "hub".into(),
+            },
+            ModuleDep {
+                from: "consumer".into(),
+                to: "hub".into(),
+            },
+        ];
+        GraphIndex::build_from_module_deps(&deps, &files)
+    }
+
+    // ── penwidth ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_penwidth_at_count_one_should_be_two_point_zero() {
+        assert_eq!(format!("{:.2}", penwidth(1)), "2.00");
+    }
+
+    #[test]
+    fn test_penwidth_at_count_four_should_be_three_point_zero() {
+        assert_eq!(format!("{:.2}", penwidth(4)), "3.00");
+    }
+
+    #[test]
+    fn test_penwidth_at_count_nine_should_be_four_point_zero() {
+        assert_eq!(format!("{:.2}", penwidth(9)), "4.00");
     }
 
     #[test]
@@ -208,42 +320,171 @@ mod tests {
         assert!(penwidth(9) > penwidth(1));
     }
 
+    // ── structure ────────────────────────────────────────────────────────────
+
     #[test]
-    fn test_render_should_include_instability_label_on_nodes() {
-        let idx = fixture_source_only();
+    fn test_render_should_open_with_digraph_coupling() {
+        let idx = fixture_one_import();
         let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains("I="));
+        assert!(dot.starts_with("digraph coupling {"));
     }
 
     #[test]
-    fn test_render_should_show_instability_one_for_dependent_node() {
-        // domain→service in coupling graph: service depends on domain.
-        // service has no dependents → I=1.00 (unstable).
-        let idx = fixture_source_only();
+    fn test_render_should_have_rankdir_rl() {
+        let idx = fixture_one_import();
         let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains("I=1.00"));
+        assert!(dot.contains("rankdir=RL;"));
     }
 
     #[test]
-    fn test_render_should_show_instability_zero_for_depended_on_node() {
-        // domain→service in coupling graph: domain is depended on by service → I=0.00 (stable).
-        let idx = fixture_source_only();
+    fn test_render_should_include_exactly_two_source_nodes() {
+        let idx = fixture_one_import();
         let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains("I=0.00"));
+        assert_eq!(dot.matches("[shape=box").count(), 2);
     }
+
+    // ── node labels ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_render_should_use_box_shape_for_source_nodes() {
+        let idx = fixture_one_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains("shape=box"));
+    }
+
+    #[test]
+    fn test_render_stable_node_should_have_exact_label() {
+        // service is imported by domain → fan_in=1, fan_out=0 → I=0.00
+        let idx = fixture_one_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains(r#"label="service.py\nI=0.00  A=0.00""#));
+    }
+
+    #[test]
+    fn test_render_unstable_node_should_have_exact_label() {
+        // domain imports service → fan_in=0, fan_out=1 → I=1.00
+        let idx = fixture_one_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains(r#"label="domain.py\nI=1.00  A=0.00""#));
+    }
+
+    #[test]
+    fn test_render_balanced_node_should_have_instability_zero_point_five() {
+        // balanced: fan_in=1 (service imports it), fan_out=1 (imports domain) → I=0.50
+        let idx = fixture_balanced_node();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains(r#"label="balanced.py\nI=0.50  A=0.00""#));
+    }
+
+    #[test]
+    fn test_render_hub_node_should_have_instability_zero_point_four() {
+        // hub: fan_in=3, fan_out=2 → I=2/5=0.40
+        let idx = fixture_hub_node();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains(r#"label="hub.py\nI=0.40  A=0.00""#));
+    }
+
+    #[test]
+    fn test_render_mid_node_should_have_instability_zero_point_six_seven() {
+        // mid: fan_in=1, fan_out=2 → I=2/3≈0.67
+        let idx = fixture_mid_node();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains(r#"label="mid.py\nI=0.67  A=0.00""#));
+    }
+
+    // ── edges ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_render_edge_should_point_from_importer_to_dependency() {
+        // domain imports service → DOT arrow: domain_idx -> service_idx (not the reverse)
+        let idx = fixture_one_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        let domain_idx = node_index_in_dot(&dot, "domain.py").expect("domain.py node");
+        let service_idx = node_index_in_dot(&dot, "service.py").expect("service.py node");
+        assert!(dot.contains(&format!("{domain_idx} -> {service_idx}")));
+        assert!(!dot.contains(&format!("{service_idx} -> {domain_idx}")));
+    }
+
+    #[test]
+    fn test_render_edge_should_show_failure_count_as_label() {
+        let idx = fixture_one_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains(r#"label="1""#));
+    }
+
+    #[test]
+    fn test_render_edge_should_show_penwidth_for_single_import() {
+        // count=1 → 1.0 + sqrt(1) = 2.00
+        let idx = fixture_one_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains("penwidth=2.00"));
+    }
+
+    #[test]
+    fn test_render_edge_should_accumulate_count_for_repeated_imports() {
+        // 4 ModuleDep entries resolving to the same edge → count=4
+        let idx = fixture_repeated_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains(r#"label="4""#));
+    }
+
+    #[test]
+    fn test_render_edge_should_show_penwidth_for_repeated_imports() {
+        // count=4 → 1.0 + sqrt(4) = 3.00
+        let idx = fixture_repeated_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains("penwidth=3.00"));
+    }
+
+    // ── test file exclusion ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_render_should_exclude_test_file_node_from_output() {
+        let idx = fixture_test_imports_source();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(!dot.contains("test_domain.py"));
+    }
+
+    #[test]
+    fn test_render_should_exclude_edge_involving_test_file() {
+        let idx = fixture_test_imports_source();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(!dot.contains("->"));
+    }
+
+    // ── cycle detection ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_render_cycle_nodes_should_get_lightcoral_fill() {
+        let idx = fixture_cycle();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains("lightcoral"));
+    }
+
+    #[test]
+    fn test_render_non_cycle_node_should_not_get_lightcoral_fill() {
+        let idx = fixture_one_import();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(!dot.contains("lightcoral"));
+    }
+
+    // ── edge cases ───────────────────────────────────────────────────────────
 
     #[test]
     fn test_render_with_empty_metrics_should_not_panic() {
-        let idx = fixture_source_only();
+        let idx = fixture_one_import();
         let empty = MetricsResult { nodes: vec![] };
         let dot = render(&idx, &empty);
         assert!(dot.contains("digraph coupling {"));
     }
 
     #[test]
-    fn test_render_should_include_abstractness_label_on_nodes() {
-        let idx = fixture_source_only();
+    fn test_render_empty_graph_should_produce_valid_dot() {
+        let idx = GraphIndex::build_from_module_deps(&[], &[]);
         let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains("A="));
+        assert!(dot.starts_with("digraph coupling {"));
+        assert!(dot.trim_end().ends_with('}'));
+        assert_eq!(dot.matches("[shape=box").count(), 0);
+        assert!(!dot.contains("->"));
     }
 }
