@@ -78,9 +78,11 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
         }
         let count = idx.graph[e].failure_count;
         let pw = penwidth(count);
+        let cycle_edge = cycles.contains(&src) && cycles.contains(&dst);
+        let color_attr = if cycle_edge { " color=crimson" } else { "" };
         writeln!(
             out,
-            "    {} -> {} [label=\"{count}\" penwidth={pw:.2}];",
+            "    {} -> {} [label=\"{count}\" penwidth={pw:.2}{color_attr}];",
             dst.index(),
             src.index()
         )
@@ -180,6 +182,25 @@ mod tests {
         let idx = GraphIndex::build_from_source_imports(&files, root);
         let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("lightcoral"));
+    }
+
+    #[test]
+    fn test_cycle_edges_should_get_crimson_color() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.py"), b"import b\n").unwrap();
+        std::fs::write(root.join("b.py"), b"import a\n").unwrap();
+        let files = vec![Utf8PathBuf::from("a.py"), Utf8PathBuf::from("b.py")];
+        let idx = GraphIndex::build_from_source_imports(&files, root);
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(dot.contains("color=crimson"));
+    }
+
+    #[test]
+    fn test_non_cycle_edges_should_not_get_crimson_color() {
+        let idx = fixture_source_only();
+        let dot = render(&idx, &stub_metrics(&idx));
+        assert!(!dot.contains("color=crimson"));
     }
 
     #[test]
