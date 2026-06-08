@@ -332,19 +332,13 @@ pub fn write_sdp_flow(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::abstractness::AbstractnessMap;
     use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode};
     use crate::graph::metrics;
     use camino::Utf8PathBuf;
     use tempfile::NamedTempFile;
 
     fn stub_metrics(idx: &GraphIndex) -> MetricsResult {
-        metrics::compute(
-            idx,
-            &AbstractnessMap {
-                by_file: std::collections::HashMap::new(),
-            },
-        )
+        metrics::compute(idx)
     }
 
     fn source_source_graph(src: &str, dst: &str) -> GraphIndex {

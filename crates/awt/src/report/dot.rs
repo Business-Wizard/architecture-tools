@@ -43,12 +43,6 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
         .map(|n| (&n.file, n.instability.as_f64()))
         .collect();
 
-    let abstractness_map: HashMap<_, f64> = metrics
-        .nodes
-        .iter()
-        .map(|n| (&n.file, n.abstractness))
-        .collect();
-
     let mut out = String::new();
     writeln!(out, "digraph coupling {{").unwrap();
     writeln!(out, "    rankdir=RL;").unwrap();
@@ -56,13 +50,7 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
     for &n in &source_nodes {
         let node = &idx.graph[n];
         let i = instability_map.get(&node.path).copied().unwrap_or(0.0);
-        let a = abstractness_map.get(&node.path).copied().unwrap_or(0.0);
-        let label = format!(
-            "{}\\nI={:.2}  A={:.2}",
-            node.path.as_str().replace('"', "\\\""),
-            i,
-            a
-        );
+        let label = format!("{}\\nI={:.2}", node.path.as_str().replace('"', "\\\""), i);
         let attrs = if cycles.contains(&n) {
             "shape=box style=filled fillcolor=lightcoral"
         } else {
@@ -96,19 +84,13 @@ fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::abstractness::AbstractnessMap;
     use crate::graph::coupling_graph::GraphIndex;
     use crate::graph::metrics;
     use camino::Utf8PathBuf;
     use py_analyzer::ModuleDep;
 
     fn stub_metrics(idx: &GraphIndex) -> MetricsResult {
-        metrics::compute(
-            idx,
-            &AbstractnessMap {
-                by_file: std::collections::HashMap::new(),
-            },
-        )
+        metrics::compute(idx)
     }
 
     fn node_index_in_dot(dot: &str, filename: &str) -> Option<usize> {
@@ -310,7 +292,7 @@ mod tests {
 
     #[test]
     fn test_non_cycle_edges_should_not_get_crimson_color() {
-        let idx = fixture_source_only();
+        let idx = fixture_one_import();
         let dot = render(&idx, &stub_metrics(&idx));
         assert!(!dot.contains("color=crimson"));
     }
@@ -357,7 +339,7 @@ mod tests {
         // service is imported by domain → fan_in=1, fan_out=0 → I=0.00
         let idx = fixture_one_import();
         let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains(r#"label="service.py\nI=0.00  A=0.00""#));
+        assert!(dot.contains(r#"label="service.py\nI=0.00""#));
     }
 
     #[test]
@@ -365,7 +347,7 @@ mod tests {
         // domain imports service → fan_in=0, fan_out=1 → I=1.00
         let idx = fixture_one_import();
         let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains(r#"label="domain.py\nI=1.00  A=0.00""#));
+        assert!(dot.contains(r#"label="domain.py\nI=1.00""#));
     }
 
     #[test]
@@ -373,7 +355,7 @@ mod tests {
         // balanced: fan_in=1 (service imports it), fan_out=1 (imports domain) → I=0.50
         let idx = fixture_balanced_node();
         let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains(r#"label="balanced.py\nI=0.50  A=0.00""#));
+        assert!(dot.contains(r#"label="balanced.py\nI=0.50""#));
     }
 
     #[test]
@@ -381,7 +363,7 @@ mod tests {
         // hub: fan_in=3, fan_out=2 → I=2/5=0.40
         let idx = fixture_hub_node();
         let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains(r#"label="hub.py\nI=0.40  A=0.00""#));
+        assert!(dot.contains(r#"label="hub.py\nI=0.40""#));
     }
 
     #[test]
@@ -389,7 +371,7 @@ mod tests {
         // mid: fan_in=1, fan_out=2 → I=2/3≈0.67
         let idx = fixture_mid_node();
         let dot = render(&idx, &stub_metrics(&idx));
-        assert!(dot.contains(r#"label="mid.py\nI=0.67  A=0.00""#));
+        assert!(dot.contains(r#"label="mid.py\nI=0.67""#));
     }
 
     // ── edges ────────────────────────────────────────────────────────────────

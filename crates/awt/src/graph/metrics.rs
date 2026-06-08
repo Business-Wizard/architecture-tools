@@ -1,7 +1,6 @@
 use camino::Utf8PathBuf;
 use petgraph::Direction;
 
-use crate::graph::abstractness::AbstractnessMap;
 use crate::graph::coupling_graph::{FileRole, GraphIndex};
 
 pub const INSTABILITY_EPSILON: f64 = 0.01;
@@ -40,8 +39,6 @@ pub struct NodeMetrics {
     pub file: Utf8PathBuf,
     pub role: FileRole,
     pub instability: Instability,
-    pub abstractness: f64,
-    pub distance: f64,
 }
 
 #[derive(Debug)]
@@ -49,8 +46,8 @@ pub struct MetricsResult {
     pub nodes: Vec<NodeMetrics>,
 }
 
-pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResult {
-    let mut nodes: Vec<NodeMetrics> = idx
+pub fn compute(idx: &GraphIndex) -> MetricsResult {
+    let nodes: Vec<NodeMetrics> = idx
         .graph
         .node_indices()
         .map(|n| {
@@ -61,8 +58,8 @@ pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResul
             let fan_in = idx.graph.edges_directed(n, Direction::Outgoing).count();
             let fan_out = idx.graph.edges_directed(n, Direction::Incoming).count();
 
-            // Isolated nodes (no edges) default to I=1.0: no-abstractions + maximally-unstable
-            // sits on the main sequence (distance=0), avoiding false violations.
+            // Isolated nodes (no edges) default to I=1.0: maximally unstable,
+            // avoiding false SDP violations.
             #[allow(clippy::cast_precision_loss)]
             let instability = Instability::new(if fan_in + fan_out == 0 {
                 1.0
@@ -70,30 +67,13 @@ pub fn compute(idx: &GraphIndex, abstractness: &AbstractnessMap) -> MetricsResul
                 fan_out as f64 / (fan_in + fan_out) as f64
             });
 
-            // Files with no class definitions default to A=0.0 (fully concrete).
-            let abstractness = abstractness
-                .by_file
-                .get(&node.path)
-                .and_then(|s| s.value)
-                .unwrap_or(0.0);
-
-            let distance = (abstractness + instability.as_f64() - 1.0).abs();
-
             NodeMetrics {
                 file: node.path.clone(),
                 role: node.role.clone(),
                 instability,
-                abstractness,
-                distance,
             }
         })
         .collect();
-
-    nodes.sort_by(|a, b| {
-        b.distance
-            .partial_cmp(&a.distance)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
 
     MetricsResult { nodes }
 }
@@ -126,16 +106,8 @@ mod tests {
         GraphIndex { graph }
     }
 
-    fn empty_abstractness() -> AbstractnessMap {
-        AbstractnessMap {
-            by_file: HashMap::new(),
-        }
-    }
-
     #[test]
     fn test_isolated_node_should_have_instability_one() {
-        let abstractness = empty_abstractness();
-
         let mut graph = CouplingGraph::new();
         graph.add_node(CouplingNode {
             path: Utf8PathBuf::from("src/isolated.py"),
@@ -143,7 +115,7 @@ mod tests {
         });
         let idx = GraphIndex { graph };
 
-        let result = compute(&idx, &abstractness);
+        let result = compute(&idx);
 
         let isolated = result
             .nodes
@@ -160,8 +132,7 @@ mod tests {
         // hub has high afferent coupling (many dependents) → I=0 (stable).
         // a and b have no dependents and depend on hub → I=1 (unstable).
         let idx = make_graph_index(&[("src/hub.py", "src/a.py"), ("src/hub.py", "src/b.py")]);
-        let abstractness = empty_abstractness();
-        let result = compute(&idx, &abstractness);
+        let result = compute(&idx);
 
         let a = result
             .nodes
@@ -181,8 +152,7 @@ mod tests {
             ("src/a.py", "src/consumer.py"),
             ("src/b.py", "src/consumer.py"),
         ]);
-        let abstractness = empty_abstractness();
-        let result = compute(&idx, &abstractness);
+        let result = compute(&idx);
 
         let a = result
             .nodes
@@ -199,8 +169,7 @@ mod tests {
             ("src/a.py", "src/balanced.py"),
             ("src/balanced.py", "src/b.py"),
         ]);
-        let abstractness = empty_abstractness();
-        let result = compute(&idx, &abstractness);
+        let result = compute(&idx);
 
         let balanced = result
             .nodes
@@ -209,20 +178,5 @@ mod tests {
             .expect("node should exist");
 
         assert_eq!(balanced.instability, Instability::new(0.5));
-    }
-
-    #[test]
-    fn test_no_class_definitions_should_default_abstractness_to_zero() {
-        let idx = make_graph_index(&[("src/a.py", "src/concrete.py")]);
-        let abstractness = empty_abstractness();
-        let result = compute(&idx, &abstractness);
-
-        let node = result
-            .nodes
-            .iter()
-            .find(|n| n.file.as_str() == "src/concrete.py")
-            .expect("node should exist");
-
-        assert_eq!(node.abstractness, 0.0);
     }
 }

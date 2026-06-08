@@ -2,9 +2,8 @@ use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use ignore::WalkBuilder;
 
-use crate::config::MainSequenceConfig;
-use crate::graph::{abstractness, coupling_graph::GraphIndex, metrics};
-use crate::report::{chart, dot, sdp_flow, terminal};
+use crate::graph::{coupling_graph::GraphIndex, metrics};
+use crate::report::{dot, sdp_flow, terminal};
 
 #[derive(Parser)]
 #[command(
@@ -47,13 +46,6 @@ pub struct InspectArgs {
 
     #[arg(
         long,
-        default_value = "main_sequence.png",
-        help = "Write I-vs-A scatter chart to this PNG file"
-    )]
-    pub chart_out: Utf8PathBuf,
-
-    #[arg(
-        long,
         default_value = "sdp_flow.png",
         help = "Write SDP dependency-flow chart to this PNG file"
     )]
@@ -82,17 +74,10 @@ fn run_inspect_command(args: &InspectArgs) {
 
             let source_files = collect_source_files(&args.path);
             let graph_idx = GraphIndex::build_from_module_deps(&inspect.module_deps, &source_files);
-            let include_dirs = vec![args.path.clone()];
-            let abstractness_map = abstractness::compute(args.path.as_std_path(), &include_dirs);
-            let metrics_result = metrics::compute(&graph_idx, &abstractness_map);
+            let metrics_result = metrics::compute(&graph_idx);
 
-            let main_seq = MainSequenceConfig::default();
             if let Err(e) = dot::write_dot(&graph_idx, &metrics_result, args.dot_out.as_path()) {
                 eprintln!("warning: could not write dot output: {e}");
-            }
-            if let Err(e) = chart::write_chart(&metrics_result, &main_seq, args.chart_out.as_path())
-            {
-                eprintln!("warning: could not write chart: {e}");
             }
             if let Err(e) =
                 sdp_flow::write_sdp_flow(&graph_idx, &metrics_result, args.sdp_out.as_path())
