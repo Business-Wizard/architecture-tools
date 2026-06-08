@@ -80,7 +80,7 @@ pub fn compute(idx: &GraphIndex) -> MetricsResult {
 mod tests {
     #![allow(clippy::float_cmp)]
     use super::*;
-    use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode};
+    use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode, FileRole};
     use std::collections::HashMap;
 
     fn make_graph_index(edges: &[(&str, &str)]) -> GraphIndex {
