@@ -6,6 +6,7 @@ mvp_base/
 # awt output files
 coupling.dot
 awt-inspect.dot
+objects.dot
 sdp_flow.png
 main_sequence.png
 
