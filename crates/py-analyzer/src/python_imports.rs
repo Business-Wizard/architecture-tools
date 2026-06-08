@@ -396,13 +396,23 @@ fn resolve_class_deps(
     all_class_names: &HashSet<String>,
     qualified_class_set: &HashSet<String>,
 ) -> ClassDef {
-    let mut class_deps: Vec<String> = rc
+    // Reverse lookup: short class name → all qualified names that carry it.
+    // Used in the post-pass to qualify bare short-name deps unambiguously.
+    let mut short_to_qualified: HashMap<&str, Vec<&str>> = HashMap::new();
+    for qname in qualified_class_set {
+        if let Some(short) = qname.rsplit('.').next() {
+            short_to_qualified
+                .entry(short)
+                .or_default()
+                .push(qname.as_str());
+        }
+    }
+
+    let raw_deps: Vec<String> = rc
         .referenced_names
         .iter()
         .filter(|n| *n != &rc.name && all_class_names.contains(*n))
         .map(|n| {
-            // If the file imported this name from a known module, emit a qualified dep.
-            // This resolves ambiguity when multiple modules define a class with the same name.
             if let Some(src_module) = rc.imported_names.get(n) {
                 let qualified = format!("{src_module}.{n}");
                 if qualified_class_set.contains(&qualified) {
@@ -410,6 +420,22 @@ fn resolve_class_deps(
                 }
             }
             n.clone()
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    // Post-pass: qualify any remaining bare short names. Drop ambiguous ones.
+    let mut class_deps: Vec<String> = raw_deps
+        .into_iter()
+        .filter_map(|dep| {
+            if qualified_class_set.contains(&dep) {
+                return Some(dep);
+            }
+            match short_to_qualified.get(dep.as_str()) {
+                Some(candidates) if candidates.len() == 1 => Some(candidates[0].to_string()),
+                _ => None,
+            }
         })
         .collect::<HashSet<_>>()
         .into_iter()
@@ -590,6 +616,201 @@ mod tests {
             imported_names: HashMap::new(),
         };
         let def = resolve_class_deps(rc, &all, &qualified);
-        assert_eq!(def.class_deps, vec!["Customer", "Product"]);
+        assert_eq!(
+            def.class_deps,
+            vec!["myapp.domain.Customer", "myapp.domain.Product"]
+        );
+    }
+
+    #[test]
+    fn test_resolve_class_deps_same_module_dep_should_be_qualified() {
+        let all = HashSet::from(["Customer".to_string()]);
+        let qualified = HashSet::from(["myapp.domain.Customer".to_string()]);
+        let rc = RawClass {
+            module: "myapp.domain".to_string(),
+            name: "Order".to_string(),
+            bases: vec![],
+            attributes: vec![],
+            methods: vec![],
+            referenced_names: vec!["Customer".to_string()],
+            imported_names: HashMap::new(),
+        };
+        let def = resolve_class_deps(rc, &all, &qualified);
+        assert_eq!(def.class_deps, vec!["myapp.domain.Customer"]);
+    }
+
+    #[test]
+    fn test_resolve_class_deps_imported_dep_stays_qualified() {
+        let all = HashSet::from(["Customer".to_string()]);
+        let qualified = HashSet::from(["myapp.customers.Customer".to_string()]);
+        let mut imported = HashMap::new();
+        imported.insert("Customer".to_string(), "myapp.customers".to_string());
+        let rc = RawClass {
+            module: "myapp.domain".to_string(),
+            name: "Order".to_string(),
+            bases: vec![],
+            attributes: vec![],
+            methods: vec![],
+            referenced_names: vec!["Customer".to_string()],
+            imported_names: imported,
+        };
+        let def = resolve_class_deps(rc, &all, &qualified);
+        assert_eq!(def.class_deps, vec!["myapp.customers.Customer"]);
+    }
+
+    #[test]
+    fn test_resolve_class_deps_ambiguous_short_name_is_dropped() {
+        let all = HashSet::from(["Base".to_string()]);
+        let qualified = HashSet::from([
+            "myapp.domain.Base".to_string(),
+            "myapp.infra.Base".to_string(),
+        ]);
+        let rc = RawClass {
+            module: "myapp.service".to_string(),
+            name: "Service".to_string(),
+            bases: vec![],
+            attributes: vec![],
+            methods: vec![],
+            referenced_names: vec!["Base".to_string()],
+            imported_names: HashMap::new(),
+        };
+        let def = resolve_class_deps(rc, &all, &qualified);
+        assert!(def.class_deps.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_class_deps_self_reference_excluded() {
+        let all = HashSet::from(["Order".to_string()]);
+        let qualified = HashSet::from(["myapp.domain.Order".to_string()]);
+        let rc = RawClass {
+            module: "myapp.domain".to_string(),
+            name: "Order".to_string(),
+            bases: vec![],
+            attributes: vec![],
+            methods: vec![],
+            referenced_names: vec!["Order".to_string()],
+            imported_names: HashMap::new(),
+        };
+        let def = resolve_class_deps(rc, &all, &qualified);
+        assert!(def.class_deps.is_empty());
+    }
+
+    // --- Integration tests on the public extract() function ---
+
+    fn write_pkg(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tmp dir");
+        for (name, src) in files {
+            std::fs::write(dir.path().join(name), src).expect("write");
+        }
+        dir
+    }
+
+    #[test]
+    fn test_extract_single_class_file_should_return_one_class_def() {
+        let pkg = write_pkg(&[("customer.py", "class Customer:\n    pass\n")]);
+        let (_, classes) = extract(pkg.path()).unwrap();
+        assert_eq!(classes.len(), 1);
+        assert!(classes[0].class_deps.is_empty());
+    }
+
+    #[test]
+    fn test_extract_two_classes_same_file_should_produce_qualified_dep() {
+        let pkg = write_pkg(&[(
+            "domain.py",
+            "class Customer:\n    pass\nclass Order:\n    def run(self, c: Customer): pass\n",
+        )]);
+        let (_, classes) = extract(pkg.path()).unwrap();
+        let order = classes.iter().find(|c| c.name == "Order").unwrap();
+        assert_eq!(order.class_deps.len(), 1);
+        assert!(order.class_deps[0].ends_with(".Customer"));
+    }
+
+    #[test]
+    fn test_extract_cross_module_dep_via_import_should_be_qualified() {
+        let pkg = write_pkg(&[
+            ("customer.py", "class Customer:\n    pass\n"),
+            (
+                "order.py",
+                "from .customer import Customer\nclass Order:\n    def __init__(self, c: Customer): pass\n",
+            ),
+        ]);
+        let (_, classes) = extract(pkg.path()).unwrap();
+        let order = classes.iter().find(|c| c.name == "Order").unwrap();
+        assert_eq!(order.class_deps.len(), 1);
+        assert!(order.class_deps[0].ends_with("customer.Customer"));
+    }
+
+    #[test]
+    fn test_extract_cross_module_no_import_ambiguous_should_drop_dep() {
+        // Two modules both define Foo — Order references "Foo" without importing it.
+        // Ambiguous: dep must be dropped.
+        let pkg = write_pkg(&[
+            ("a.py", "class Foo:\n    pass\n"),
+            ("b.py", "class Foo:\n    pass\n"),
+            (
+                "order.py",
+                "class Order:\n    def run(self, x: Foo): pass\n",
+            ),
+        ]);
+        let (_, classes) = extract(pkg.path()).unwrap();
+        let order = classes.iter().find(|c| c.name == "Order").unwrap();
+        assert!(order.class_deps.is_empty());
+    }
+
+    #[test]
+    fn test_extract_self_reference_should_be_excluded() {
+        let pkg = write_pkg(&[(
+            "domain.py",
+            "class Order:\n    def clone(self) -> 'Order': pass\n",
+        )]);
+        let (_, classes) = extract(pkg.path()).unwrap();
+        let order = classes.iter().find(|c| c.name == "Order").unwrap();
+        assert!(order.class_deps.is_empty());
+    }
+
+    #[test]
+    fn test_extract_stdlib_base_class_not_in_graph_should_produce_no_dep() {
+        let pkg = write_pkg(&[(
+            "repo.py",
+            "from typing import Protocol\nclass Repo(Protocol):\n    pass\n",
+        )]);
+        let (_, classes) = extract(pkg.path()).unwrap();
+        let repo = classes.iter().find(|c| c.name == "Repo").unwrap();
+        assert!(repo.class_deps.is_empty());
+    }
+
+    #[test]
+    fn test_extract_module_deps_should_reflect_import_statements() {
+        let pkg = write_pkg(&[
+            ("customer.py", "class Customer:\n    pass\n"),
+            (
+                "order.py",
+                "from .customer import Customer\nclass Order:\n    pass\n",
+            ),
+        ]);
+        let (module_deps, _) = extract(pkg.path()).unwrap();
+        let has_edge = module_deps
+            .iter()
+            .any(|d| d.from.contains("order") && d.to.contains("customer"));
+        assert!(has_edge);
+    }
+
+    #[test]
+    fn test_extract_multiple_files_should_collect_all_classes() {
+        let pkg = write_pkg(&[
+            ("customer.py", "class Customer:\n    pass\n"),
+            ("order.py", "class Order:\n    pass\n"),
+            ("service.py", "class Service:\n    pass\n"),
+        ]);
+        let (_, classes) = extract(pkg.path()).unwrap();
+        assert_eq!(classes.len(), 3);
+    }
+
+    #[test]
+    fn test_extract_empty_directory_should_return_empty_vecs() {
+        let pkg = write_pkg(&[]);
+        let (module_deps, classes) = extract(pkg.path()).unwrap();
+        assert!(module_deps.is_empty());
+        assert!(classes.is_empty());
     }
 }

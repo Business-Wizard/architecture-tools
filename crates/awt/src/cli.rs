@@ -134,7 +134,12 @@ fn run_inspect_command(args: &InspectArgs) {
                         eprintln!("warning: could not write objects dot output: {e}");
                     }
                 }
-                Ok(_) => {}
+                Ok(_) => {
+                    eprintln!(
+                        "warning: no class definitions found in {}, objects.dot will not be written",
+                        args.path
+                    );
+                }
                 Err(e) => eprintln!("warning: could not extract object definitions: {e}"),
             }
 

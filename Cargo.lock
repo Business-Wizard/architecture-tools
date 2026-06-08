@@ -956,6 +956,7 @@ dependencies = [
  "lang-core",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tree-sitter",
  "tree-sitter-python",

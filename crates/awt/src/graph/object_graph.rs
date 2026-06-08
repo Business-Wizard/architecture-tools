@@ -14,7 +14,7 @@ pub enum ObjectKind {
 impl ObjectKind {
     fn from_bases(bases: &[String]) -> Self {
         for base in bases {
-            let short = base.split('.').last().unwrap_or(base.as_str());
+            let short = base.split('.').next_back().unwrap_or(base.as_str());
             match short {
                 "Protocol" => return Self::Interface,
                 "ABC" | "ABCMeta" => return Self::TraitLike,
@@ -47,7 +47,7 @@ pub type ObjectGraph = DiGraph<ObjectNode, ObjectEdge>;
 
 pub struct ObjectGraphIndex {
     pub graph: ObjectGraph,
-    /// Maps qualified_name → NodeIndex for external lookups.
+    /// Maps `qualified_name` → `NodeIndex` for external lookups.
     pub node_map: HashMap<String, NodeIndex>,
 }
 
@@ -85,16 +85,16 @@ impl ObjectGraphIndex {
             }
 
             for dep in &def.class_deps {
-                if let Some(&dst) = node_map.get(dep) {
-                    if dst != src {
-                        graph.add_edge(
-                            src,
-                            dst,
-                            ObjectEdge {
-                                kind: EdgeKind::Uses,
-                            },
-                        );
-                    }
+                if let Some(&dst) = node_map.get(dep)
+                    && dst != src
+                {
+                    graph.add_edge(
+                        src,
+                        dst,
+                        ObjectEdge {
+                            kind: EdgeKind::Uses,
+                        },
+                    );
                 }
             }
         }
