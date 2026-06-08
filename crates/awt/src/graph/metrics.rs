@@ -1,7 +1,7 @@
 use camino::Utf8PathBuf;
 use petgraph::Direction;
 
-use crate::graph::coupling_graph::{FileRole, GraphIndex};
+use crate::graph::coupling_graph::GraphIndex;
 
 pub const INSTABILITY_EPSILON: f64 = 0.01;
 
@@ -37,7 +37,6 @@ pub fn violates_sdp(dependency: Dependency, depender: Depender) -> bool {
 #[derive(Debug)]
 pub struct NodeMetrics {
     pub file: Utf8PathBuf,
-    pub role: FileRole,
     pub instability: Instability,
 }
 
@@ -69,7 +68,6 @@ pub fn compute(idx: &GraphIndex) -> MetricsResult {
 
             NodeMetrics {
                 file: node.path.clone(),
-                role: node.role.clone(),
                 instability,
             }
         })

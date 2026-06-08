@@ -25,7 +25,6 @@ impl ParsedFile {
     }
 }
 
-#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct ImportInfo {
     pub module_path: String,
@@ -106,14 +105,12 @@ fn has_base_with_name(argument_list: Node<'_>, source: &[u8], target_name: &str)
     false
 }
 
-#[cfg(test)]
 pub fn find_imports(parsed: &ParsedFile) -> Vec<ImportInfo> {
     let mut results = Vec::new();
     collect_imports(parsed.root(), &parsed.source, &mut results);
     results
 }
 
-#[cfg(test)]
 pub fn extract_module_names(statement: &str) -> Vec<String> {
     let s = statement.trim();
     if let Some(rest) = s.strip_prefix("from ") {
@@ -143,7 +140,6 @@ pub fn extract_module_names(statement: &str) -> Vec<String> {
     }
 }
 
-#[cfg(test)]
 fn collect_imports(node: Node<'_>, source: &[u8], out: &mut Vec<ImportInfo>) {
     match node.kind() {
         "import_statement" | "import_from_statement" => {
