@@ -3,12 +3,6 @@ use serde::{Deserialize, Serialize};
 pub use lang_core::ModuleDep;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InspectResult {
-    pub module_deps: Vec<ModuleDep>,
-    pub classes: Vec<ClassDef>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClassDef {
     pub module: String,
     pub name: String,

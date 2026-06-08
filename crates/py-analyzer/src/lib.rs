@@ -3,34 +3,9 @@ mod model;
 mod python_imports;
 
 pub use error::InspectorError;
-pub use model::{ClassDef, InspectResult, ModuleDep};
+pub use lang_core::ModuleDep;
 
 use std::path::Path;
-use std::time::Duration;
-
-/// Inspect a Python package directory and return module dependency edges and class definitions.
-///
-/// # Errors
-/// Returns `InspectorError` if file I/O or parsing fails.
-pub fn inspect(package_path: &Path) -> Result<InspectResult, InspectorError> {
-    let (module_deps, classes) = python_imports::extract(package_path)?;
-    Ok(InspectResult {
-        module_deps,
-        classes,
-    })
-}
-
-/// Identical to [`inspect`]; the `timeout` parameter is accepted for API compatibility
-/// but ignored (no subprocess is involved).
-///
-/// # Errors
-/// Returns `InspectorError` if file I/O or parsing fails.
-pub fn inspect_with_timeout(
-    package_path: &Path,
-    _timeout: Duration,
-) -> Result<InspectResult, InspectorError> {
-    inspect(package_path)
-}
 
 pub struct PythonAnalyzer;
 
@@ -39,8 +14,8 @@ impl lang_core::LanguageAnalyzer for PythonAnalyzer {
         &self,
         path: &Path,
     ) -> Result<Vec<lang_core::ModuleDep>, Box<dyn std::error::Error + Send + Sync>> {
-        inspect(path)
-            .map(|r| r.module_deps)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        let (module_deps, _classes) = python_imports::extract(path)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+        Ok(module_deps)
     }
 }
