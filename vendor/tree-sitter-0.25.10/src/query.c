@@ -1341,7 +1341,7 @@ static void ts_query__perform_analysis(
           // of the query pattern.
           bool does_match = false;
 
-          // ERROR nodes can appear anywhere, so if the step is 
+          // ERROR nodes can appear anywhere, so if the step is
           // looking for an ERROR node, consider it potentially matchable.
           if (step->symbol == ts_builtin_sym_error) {
             does_match = true;

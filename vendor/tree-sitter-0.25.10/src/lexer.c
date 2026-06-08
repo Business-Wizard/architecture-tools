@@ -204,7 +204,7 @@ static void ts_lexer__do_advance(Lexer *self, bool skip) {
       self->current_position.extent.column = 0;
       ts_lexer__set_column_data(self, 0);
     } else {
-      bool is_bom = self->current_position.bytes == 0 && 
+      bool is_bom = self->current_position.bytes == 0 &&
         self->data.lookahead == BYTE_ORDER_MARK;
       if (!is_bom) ts_lexer__increment_column_data(self);
       self->current_position.extent.column += self->lookahead_size;

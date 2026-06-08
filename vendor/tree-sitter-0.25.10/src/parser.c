@@ -1893,7 +1893,7 @@ static bool ts_parser__balance_subtree(TSParser *self) {
       return false;
     }
 
-    MutableSubtree tree = *array_get(&self->tree_pool.tree_stack, 
+    MutableSubtree tree = *array_get(&self->tree_pool.tree_stack,
       self->tree_pool.tree_stack.size - 1
     );
 
