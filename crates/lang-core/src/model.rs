@@ -74,3 +74,13 @@ pub struct ModuleDep {
     pub from: ModuleName,
     pub to: ModuleName,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClassDef {
+    pub module: String,
+    pub name: String,
+    pub bases: Vec<String>,
+    pub attributes: Vec<String>,
+    pub methods: Vec<String>,
+    pub class_deps: Vec<String>,
+}
