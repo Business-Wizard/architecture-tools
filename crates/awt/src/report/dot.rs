@@ -22,6 +22,19 @@ fn cycle_nodes(idx: &GraphIndex) -> HashSet<NodeIndex> {
         .collect()
 }
 
+/// Returns the set of module name prefixes (directory stems) for all files in a coupling cycle.
+/// Used to cross-highlight object nodes whose containing module participates in a file-level cycle.
+pub fn cycle_module_names(idx: &GraphIndex) -> HashSet<String> {
+    cycle_nodes(idx)
+        .into_iter()
+        .filter_map(|n| {
+            let path = &idx.graph[n].path;
+            // Use the immediate parent directory as the module stem.
+            path.parent().map(|p| p.as_str().replace('/', "."))
+        })
+        .collect()
+}
+
 fn penwidth(count: usize) -> f32 {
     // 1.0 at count=1, grows with sqrt to avoid runaway thickness
     // failure_count is always small in practice; cap to avoid any precision concern

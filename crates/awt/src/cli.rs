@@ -2,8 +2,8 @@ use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use ignore::WalkBuilder;
 
-use crate::graph::{coupling_graph::GraphIndex, metrics};
-use crate::report::{dot, sdp_flow, terminal};
+use crate::graph::{coupling_graph::GraphIndex, metrics, object_graph::ObjectGraphIndex};
+use crate::report::{dot, objects_dot, sdp_flow, terminal};
 
 #[derive(Parser)]
 #[command(
@@ -64,6 +64,13 @@ pub struct InspectArgs {
         help = "Write SDP dependency-flow chart to this PNG file"
     )]
     pub sdp_out: Utf8PathBuf,
+
+    #[arg(
+        long,
+        default_value = "objects.dot",
+        help = "Write object-level class graph to this .dot file"
+    )]
+    pub objects_out: Utf8PathBuf,
 }
 
 pub fn run() {
@@ -74,15 +81,18 @@ pub fn run() {
 }
 
 fn run_inspect_command(args: &InspectArgs) {
-    let (analyzer, namer): (
+    let (analyzer, object_analyzer, namer): (
         Box<dyn lang_core::LanguageAnalyzer>,
+        Box<dyn lang_core::ObjectAnalyzer>,
         Box<dyn lang_core::ModuleNamer>,
     ) = match args.language {
         Language::Python => (
             Box::new(py_analyzer::PythonAnalyzer),
             Box::new(py_analyzer::PythonAnalyzer),
+            Box::new(py_analyzer::PythonAnalyzer),
         ),
         Language::Rust => (
+            Box::new(rs_analyzer::RustAnalyzer),
             Box::new(rs_analyzer::RustAnalyzer),
             Box::new(rs_analyzer::RustAnalyzer),
         ),
@@ -110,6 +120,21 @@ fn run_inspect_command(args: &InspectArgs) {
                 sdp_flow::write_sdp_flow(&graph_idx, &metrics_result, args.sdp_out.as_path())
             {
                 eprintln!("warning: could not write SDP flow chart: {e}");
+            }
+
+            match object_analyzer.object_defs(args.path.as_std_path()) {
+                Ok(class_defs) => {
+                    let obj_idx = ObjectGraphIndex::build_from_class_defs(&class_defs);
+                    let cycle_modules = dot::cycle_module_names(&graph_idx);
+                    if let Err(e) = objects_dot::write_objects_dot(
+                        &obj_idx,
+                        &cycle_modules,
+                        args.objects_out.as_path(),
+                    ) {
+                        eprintln!("warning: could not write objects dot output: {e}");
+                    }
+                }
+                Err(e) => eprintln!("warning: could not extract object definitions: {e}"),
             }
 
             if args.fail_on_violations && !violations.is_empty() {
