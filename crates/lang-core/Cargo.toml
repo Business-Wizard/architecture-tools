@@ -1,15 +1,13 @@
 [package]
-name = "graph-analysis"
+name = "lang-core"
 version = "0.1.0"
 edition = "2024"
-description = "Pure analysis of InspectResult: layer violations and coupling smells."
+description = "Language-agnostic dependency model and analyzer trait."
 license = "AGPL-3.0-or-later"
 authors = ["Better Bearings"]
 
 [dependencies]
-lang-core = { path = "../lang-core" }
 serde = { version = "1", features = ["derive"] }
-petgraph = "0.7"
 
 [lints]
 workspace = true

@@ -105,7 +105,7 @@ fn build_module_map(source_files: &[Utf8PathBuf]) -> HashMap<String, Utf8PathBuf
 
 impl GraphIndex {
     pub fn build_from_module_deps(
-        deps: &[py_analyzer::ModuleDep],
+        deps: &[lang_core::ModuleDep],
         source_files: &[Utf8PathBuf],
     ) -> Self {
         let module_map = build_module_map(source_files);
@@ -297,7 +297,7 @@ mod tests {
             Utf8PathBuf::from("order.py"),
             Utf8PathBuf::from("billing.py"),
         ];
-        let deps = vec![py_analyzer::ModuleDep {
+        let deps = vec![lang_core::ModuleDep {
             from: "order".to_string(),
             to: "billing".to_string(),
         }];
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn test_build_from_module_deps_should_skip_third_party_deps() {
         let files = vec![Utf8PathBuf::from("order.py")];
-        let deps = vec![py_analyzer::ModuleDep {
+        let deps = vec![lang_core::ModuleDep {
             from: "order".to_string(),
             to: "requests".to_string(),
         }];
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn test_build_from_module_deps_should_not_add_self_edges() {
         let files = vec![Utf8PathBuf::from("order.py")];
-        let deps = vec![py_analyzer::ModuleDep {
+        let deps = vec![lang_core::ModuleDep {
             from: "order".to_string(),
             to: "order".to_string(),
         }];

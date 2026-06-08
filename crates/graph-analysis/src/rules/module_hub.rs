@@ -1,16 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
-use py_analyzer::InspectResult;
+use lang_core::ModuleDep;
 
 use crate::model::{GraphRuleId, GraphSeverity, GraphViolation, ViolationKind};
 
 const MIN_HUB_THRESHOLD: usize = 3;
 
 #[must_use]
-pub fn check(result: &InspectResult) -> Vec<GraphViolation> {
+pub fn check(deps: &[ModuleDep]) -> Vec<GraphViolation> {
     // Count unique importers per module (deduplicate (from, to) pairs).
     let mut fan_in: HashMap<&str, HashSet<&str>> = HashMap::new();
-    for dep in &result.module_deps {
+    for dep in deps {
         fan_in
             .entry(dep.to.as_str())
             .or_default()
@@ -67,24 +67,20 @@ fn derived_threshold(counts: &[usize]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use py_analyzer::{InspectResult, ModuleDep};
 
-    fn make_result(deps: &[(&str, &str)]) -> InspectResult {
-        InspectResult {
-            module_deps: deps
-                .iter()
-                .map(|(f, t)| ModuleDep {
-                    from: (*f).to_string(),
-                    to: (*t).to_string(),
-                })
-                .collect(),
-            classes: vec![],
-        }
+    fn make_deps(pairs: &[(&str, &str)]) -> Vec<ModuleDep> {
+        pairs
+            .iter()
+            .map(|(f, t)| ModuleDep {
+                from: (*f).to_string(),
+                to: (*t).to_string(),
+            })
+            .collect()
     }
 
     #[test]
     fn test_hub_empty_module_deps_should_produce_no_violations() {
-        let actual = check(&make_result(&[]));
+        let actual = check(&make_deps(&[]));
         assert_eq!(actual, vec![]);
     }
 
@@ -101,7 +97,7 @@ mod tests {
         for src in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"] {
             deps.push((src, "hub"));
         }
-        let actual = check(&make_result(&deps));
+        let actual = check(&make_deps(&deps));
         assert_eq!(actual.len(), 1);
         assert_eq!(actual[0].rule, GraphRuleId::ModuleHub);
     }
@@ -109,14 +105,14 @@ mod tests {
     #[test]
     fn test_hub_duplicate_edges_should_count_unique_importers_only() {
         // Same importer repeated — should count as 1.
-        let actual = check(&make_result(&[("a", "hub"), ("a", "hub"), ("a", "hub")]));
+        let actual = check(&make_deps(&[("a", "hub"), ("a", "hub"), ("a", "hub")]));
         assert_eq!(actual, vec![]);
     }
 
     #[test]
     fn test_hub_below_threshold_should_produce_no_violation() {
         // Only 1 importer — well below any threshold.
-        let actual = check(&make_result(&[("a", "hub")]));
+        let actual = check(&make_deps(&[("a", "hub")]));
         assert_eq!(actual, vec![]);
     }
 }

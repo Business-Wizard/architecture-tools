@@ -9,6 +9,7 @@ authors = ["Better Bearings"]
 [dependencies]
 architecture-core = { path = "../architecture-core" }
 graph-analysis = { path = "../graph-analysis" }
+lang-core = { path = "../lang-core" }
 py-analyzer = { path = "../py-analyzer" }
 clap = { version = "4", features = ["derive"] }
 camino = { version = "1", features = ["serde1"] }

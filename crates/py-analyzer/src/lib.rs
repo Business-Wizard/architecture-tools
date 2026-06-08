@@ -31,3 +31,16 @@ pub fn inspect_with_timeout(
 ) -> Result<InspectResult, InspectorError> {
     inspect(package_path)
 }
+
+pub struct PythonAnalyzer;
+
+impl lang_core::LanguageAnalyzer for PythonAnalyzer {
+    fn module_deps(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<lang_core::ModuleDep>, Box<dyn std::error::Error + Send + Sync>> {
+        inspect(path)
+            .map(|r| r.module_deps)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    }
+}

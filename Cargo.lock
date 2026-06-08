@@ -97,6 +97,7 @@ dependencies = [
  "comfy-table",
  "graph-analysis",
  "ignore",
+ "lang-core",
  "petgraph",
  "plotters",
  "py-analyzer",
@@ -598,8 +599,8 @@ dependencies = [
 name = "graph-analysis"
 version = "0.1.0"
 dependencies = [
+ "lang-core",
  "petgraph",
- "py-analyzer",
  "serde",
 ]
 
@@ -700,6 +701,13 @@ dependencies = [
  "futures-util",
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "lang-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -944,6 +952,7 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "ignore",
+ "lang-core",
  "serde",
  "serde_json",
  "thiserror",

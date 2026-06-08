@@ -1,16 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
-use py_analyzer::InspectResult;
+use lang_core::ModuleDep;
 
 use crate::model::{GraphRuleId, GraphSeverity, GraphViolation, ViolationKind};
 
 const MIN_GOD_THRESHOLD: usize = 3;
 
 #[must_use]
-pub fn check(result: &InspectResult) -> Vec<GraphViolation> {
+pub fn check(deps: &[ModuleDep]) -> Vec<GraphViolation> {
     // Count unique imports per module (deduplicate (from, to) pairs).
     let mut fan_out: HashMap<&str, HashSet<&str>> = HashMap::new();
-    for dep in &result.module_deps {
+    for dep in deps {
         fan_out
             .entry(dep.from.as_str())
             .or_default()
@@ -67,24 +67,20 @@ fn derived_threshold(counts: &[usize]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use py_analyzer::{InspectResult, ModuleDep};
 
-    fn make_result(deps: &[(&str, &str)]) -> InspectResult {
-        InspectResult {
-            module_deps: deps
-                .iter()
-                .map(|(f, t)| ModuleDep {
-                    from: (*f).to_string(),
-                    to: (*t).to_string(),
-                })
-                .collect(),
-            classes: vec![],
-        }
+    fn make_deps(pairs: &[(&str, &str)]) -> Vec<ModuleDep> {
+        pairs
+            .iter()
+            .map(|(f, t)| ModuleDep {
+                from: (*f).to_string(),
+                to: (*t).to_string(),
+            })
+            .collect()
     }
 
     #[test]
     fn test_god_module_empty_module_deps_should_produce_no_violations() {
-        let actual = check(&make_result(&[]));
+        let actual = check(&make_deps(&[]));
         assert_eq!(actual, vec![]);
     }
 
@@ -101,7 +97,7 @@ mod tests {
         for tgt in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"] {
             deps.push(("god", tgt));
         }
-        let actual = check(&make_result(&deps));
+        let actual = check(&make_deps(&deps));
         assert_eq!(actual.len(), 1);
         assert_eq!(actual[0].rule, GraphRuleId::GodModule);
     }
@@ -109,13 +105,13 @@ mod tests {
     #[test]
     fn test_god_module_duplicate_edges_should_count_unique_imports_only() {
         // Same target repeated — should count as 1.
-        let actual = check(&make_result(&[("god", "a"), ("god", "a"), ("god", "a")]));
+        let actual = check(&make_deps(&[("god", "a"), ("god", "a"), ("god", "a")]));
         assert_eq!(actual, vec![]);
     }
 
     #[test]
     fn test_god_module_below_threshold_should_produce_no_violation() {
-        let actual = check(&make_result(&[("god", "a")]));
+        let actual = check(&make_deps(&[("god", "a")]));
         assert_eq!(actual, vec![]);
     }
 }

@@ -87,7 +87,7 @@ mod tests {
     use crate::graph::coupling_graph::GraphIndex;
     use crate::graph::metrics;
     use camino::Utf8PathBuf;
-    use py_analyzer::ModuleDep;
+    use lang_core::ModuleDep;
 
     fn stub_metrics(idx: &GraphIndex) -> MetricsResult {
         metrics::compute(idx)

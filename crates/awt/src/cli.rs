@@ -1,5 +1,5 @@
 use camino::Utf8PathBuf;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use ignore::WalkBuilder;
 
 use crate::graph::{coupling_graph::GraphIndex, metrics};
@@ -20,12 +20,25 @@ pub enum Commands {
     Inspect(InspectArgs),
 }
 
+#[derive(ValueEnum, Clone, Debug, Default)]
+pub enum Language {
+    #[default]
+    Python,
+}
+
 #[derive(Parser, Debug)]
 pub struct InspectArgs {
-    #[arg(help = "Path to the Python package to inspect")]
+    #[arg(help = "Path to the package to inspect")]
     pub path: Utf8PathBuf,
 
-    #[arg(long, default_value_t = 120, help = "Timeout in seconds for each tool")]
+    #[arg(long, default_value = "python", help = "Language of the codebase")]
+    pub language: Language,
+
+    #[arg(
+        long,
+        default_value_t = 120,
+        help = "Timeout in seconds (reserved for future use)"
+    )]
     pub timeout_secs: u64,
 
     #[arg(
@@ -60,12 +73,14 @@ pub fn run() {
 }
 
 fn run_inspect_command(args: &InspectArgs) {
-    let timeout = std::time::Duration::from_secs(args.timeout_secs);
-    let result = py_analyzer::inspect_with_timeout(args.path.as_std_path(), timeout);
-    match result {
-        Ok(inspect) => {
+    let analyzer: Box<dyn lang_core::LanguageAnalyzer> = match args.language {
+        Language::Python => Box::new(py_analyzer::PythonAnalyzer),
+    };
+
+    match analyzer.module_deps(args.path.as_std_path()) {
+        Ok(module_deps) => {
             let violations = if args.violations {
-                let v = ::graph_analysis::analyze(&inspect);
+                let v = ::graph_analysis::analyze(&module_deps);
                 terminal::print_graph_violations_section(&v, &args.path);
                 v
             } else {
@@ -73,7 +88,7 @@ fn run_inspect_command(args: &InspectArgs) {
             };
 
             let source_files = collect_source_files(&args.path);
-            let graph_idx = GraphIndex::build_from_module_deps(&inspect.module_deps, &source_files);
+            let graph_idx = GraphIndex::build_from_module_deps(&module_deps, &source_files);
             let metrics_result = metrics::compute(&graph_idx);
 
             if let Err(e) = dot::write_dot(&graph_idx, &metrics_result, args.dot_out.as_path()) {
