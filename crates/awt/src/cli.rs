@@ -81,8 +81,7 @@ fn run_inspect_command(args: &InspectArgs) {
             };
 
             let source_files = collect_source_files(&args.path);
-            let graph_idx =
-                GraphIndex::build_from_source_imports(&source_files, args.path.as_std_path());
+            let graph_idx = GraphIndex::build_from_module_deps(&inspect.module_deps, &source_files);
             let include_dirs = vec![args.path.clone()];
             let abstractness_map = abstractness::compute(args.path.as_std_path(), &include_dirs);
             let metrics_result = metrics::compute(&graph_idx, &abstractness_map);

@@ -59,6 +59,27 @@ fn get_or_insert_node(
     idx
 }
 
+// Try the full name first, then progressively strip leading components.
+// Handles cases where `dep.from`/`dep.to` carry a root-package prefix
+// (e.g. "src.domain") that is absent from source_files paths (which are
+// relative to src/, so only "domain" is in the map).
+fn resolve_module<'a>(
+    module_map: &'a HashMap<String, Utf8PathBuf>,
+    name: &str,
+) -> Option<&'a Utf8PathBuf> {
+    let mut s = name;
+    loop {
+        if let Some(v) = module_map.get(s) {
+            return Some(v);
+        }
+        // strip one leading dotted component
+        match s.find('.') {
+            Some(pos) => s = &s[pos + 1..],
+            None => return None,
+        }
+    }
+}
+
 fn build_module_map(source_files: &[Utf8PathBuf]) -> HashMap<String, Utf8PathBuf> {
     let mut map = HashMap::new();
     for file in source_files {
@@ -83,6 +104,38 @@ fn build_module_map(source_files: &[Utf8PathBuf]) -> HashMap<String, Utf8PathBuf
 }
 
 impl GraphIndex {
+    pub fn build_from_module_deps(
+        deps: &[py_analyzer::ModuleDep],
+        source_files: &[Utf8PathBuf],
+    ) -> Self {
+        let module_map = build_module_map(source_files);
+        let mut graph = CouplingGraph::new();
+        let mut node_map: HashMap<Utf8PathBuf, NodeIndex> = HashMap::new();
+
+        for dep in deps {
+            // dep.from imports dep.to → edge: dep.to (dependency) → dep.from (importer/depender)
+            let Some(dep_file) = resolve_module(&module_map, &dep.to) else {
+                continue;
+            };
+            let Some(importer_file) = resolve_module(&module_map, &dep.from) else {
+                continue;
+            };
+            if dep_file == importer_file {
+                continue;
+            }
+            let dep_idx = get_or_insert_node(&mut graph, &mut node_map, dep_file.clone());
+            let imp_idx = get_or_insert_node(&mut graph, &mut node_map, importer_file.clone());
+            if let Some(e) = graph.find_edge(dep_idx, imp_idx) {
+                graph[e].failure_count += 1;
+            } else {
+                graph.add_edge(dep_idx, imp_idx, CouplingEdge { failure_count: 1 });
+            }
+        }
+
+        GraphIndex { graph }
+    }
+
+    #[cfg(test)]
     pub fn build_from_source_imports(
         source_files: &[Utf8PathBuf],
         repo_root: &std::path::Path,
@@ -234,6 +287,48 @@ mod tests {
         let files = vec![Utf8PathBuf::from("order.py")];
         let idx = GraphIndex::build_from_source_imports(&files, root);
 
+        assert_eq!(idx.graph.edge_count(), 0);
+    }
+
+    #[test]
+    fn test_build_from_module_deps_should_add_edge_from_dependency_to_importer() {
+        // "order" imports "billing" → edge: billing.py → order.py
+        let files = vec![
+            Utf8PathBuf::from("order.py"),
+            Utf8PathBuf::from("billing.py"),
+        ];
+        let deps = vec![py_analyzer::ModuleDep {
+            from: "order".to_string(),
+            to: "billing".to_string(),
+        }];
+        let idx = GraphIndex::build_from_module_deps(&deps, &files);
+
+        assert_eq!(idx.graph.edge_count(), 1);
+        let edge = idx.graph.edge_indices().next().unwrap();
+        let (src, dst) = idx.graph.edge_endpoints(edge).unwrap();
+        assert_eq!(idx.graph[src].path, Utf8PathBuf::from("billing.py"));
+        assert_eq!(idx.graph[dst].path, Utf8PathBuf::from("order.py"));
+    }
+
+    #[test]
+    fn test_build_from_module_deps_should_skip_third_party_deps() {
+        let files = vec![Utf8PathBuf::from("order.py")];
+        let deps = vec![py_analyzer::ModuleDep {
+            from: "order".to_string(),
+            to: "requests".to_string(),
+        }];
+        let idx = GraphIndex::build_from_module_deps(&deps, &files);
+        assert_eq!(idx.graph.edge_count(), 0);
+    }
+
+    #[test]
+    fn test_build_from_module_deps_should_not_add_self_edges() {
+        let files = vec![Utf8PathBuf::from("order.py")];
+        let deps = vec![py_analyzer::ModuleDep {
+            from: "order".to_string(),
+            to: "order".to_string(),
+        }];
+        let idx = GraphIndex::build_from_module_deps(&deps, &files);
         assert_eq!(idx.graph.edge_count(), 0);
     }
 }

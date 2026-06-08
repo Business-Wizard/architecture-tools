@@ -67,9 +67,12 @@ fn collect_python_files(root: &Path) -> Result<Vec<std::path::PathBuf>, Inspecto
 
 fn path_to_module_name(file: &Path, root: &Path) -> String {
     let rel = file.strip_prefix(root).unwrap_or(file);
-    rel.to_string_lossy()
-        .trim_end_matches(".py")
-        .replace(['/', '\\'], ".")
+    let without_ext = rel.to_string_lossy().trim_end_matches(".py").to_string();
+    let dotted = without_ext.replace(['/', '\\'], ".");
+    dotted
+        .strip_suffix(".__init__")
+        .unwrap_or(&dotted)
+        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -433,6 +436,20 @@ mod tests {
 
     fn parse(src: &str) -> ParsedFile {
         ParsedFile::parse(src.as_bytes()).expect("parse failed")
+    }
+
+    #[test]
+    fn test_path_to_module_name_init_file_should_resolve_to_package_name() {
+        let root = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/myapp/domain/__init__.py");
+        assert_eq!(path_to_module_name(file, root), "myapp.domain");
+    }
+
+    #[test]
+    fn test_path_to_module_name_regular_file_should_resolve_to_dotted_path() {
+        let root = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/myapp/domain/order.py");
+        assert_eq!(path_to_module_name(file, root), "myapp.domain.order");
     }
 
     #[test]
