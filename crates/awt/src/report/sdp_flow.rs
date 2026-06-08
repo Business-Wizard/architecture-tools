@@ -357,7 +357,7 @@ mod tests {
             Utf8PathBuf::from(src_name.to_str().unwrap()),
             Utf8PathBuf::from(dst_name.to_str().unwrap()),
         ];
-        GraphIndex::build_from_source_imports(&files, root)
+        GraphIndex::build_from_source_imports(&files, root, &py_analyzer::PythonAnalyzer)
     }
 
     fn source_test_graph() -> GraphIndex {
@@ -369,7 +369,7 @@ mod tests {
             Utf8PathBuf::from("domain.py"),
             Utf8PathBuf::from("test_domain.py"),
         ];
-        GraphIndex::build_from_source_imports(&files, root)
+        GraphIndex::build_from_source_imports(&files, root, &py_analyzer::PythonAnalyzer)
     }
 
     fn make_large_graph(n: usize) -> (GraphIndex, MetricsResult) {
@@ -465,7 +465,8 @@ mod tests {
         let tmp = NamedTempFile::with_suffix(".png").unwrap();
         let path = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let idx = GraphIndex::build_from_source_imports(&[], dir.path());
+        let idx =
+            GraphIndex::build_from_source_imports(&[], dir.path(), &py_analyzer::PythonAnalyzer);
         let m = stub_metrics(&idx);
         let result = write_sdp_flow(&idx, &m, path.as_path());
         assert!(result.is_ok());

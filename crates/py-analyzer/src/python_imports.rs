@@ -112,8 +112,8 @@ fn collect_module_deps(parsed: &ParsedFile, module_name: &str, out: &mut Vec<Mod
     for stmt in imports {
         for target in extract_module_names(&stmt, module_name) {
             out.push(ModuleDep {
-                from: module_name.to_string(),
-                to: target,
+                from: module_name.into(),
+                to: target.into(),
             });
         }
     }
@@ -507,7 +507,10 @@ mod tests {
         let parsed = parse(src);
         let mut deps = Vec::new();
         collect_module_deps(&parsed, "myapp.views", &mut deps);
-        let actual: Vec<(String, String)> = deps.into_iter().map(|d| (d.from, d.to)).collect();
+        let actual: Vec<(String, String)> = deps
+            .into_iter()
+            .map(|d| (d.from.to_string(), d.to.to_string()))
+            .collect();
         assert_eq!(
             actual,
             vec![
@@ -523,7 +526,10 @@ mod tests {
         let parsed = parse(src);
         let mut deps = Vec::new();
         collect_module_deps(&parsed, "src.order", &mut deps);
-        let actual: Vec<(String, String)> = deps.into_iter().map(|d| (d.from, d.to)).collect();
+        let actual: Vec<(String, String)> = deps
+            .into_iter()
+            .map(|d| (d.from.to_string(), d.to.to_string()))
+            .collect();
         assert_eq!(
             actual,
             vec![("src.order".to_string(), "src.customer".to_string())]

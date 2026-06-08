@@ -26,12 +26,12 @@ mod tests {
     fn test_analyze_cycle_should_be_detected() {
         let deps = vec![
             ModuleDep {
-                from: "a".to_string(),
-                to: "b".to_string(),
+                from: "a".into(),
+                to: "b".into(),
             },
             ModuleDep {
-                from: "b".to_string(),
-                to: "a".to_string(),
+                from: "b".into(),
+                to: "a".into(),
             },
         ];
         let actual = analyze(&deps);

@@ -11,6 +11,7 @@ architecture-core = { path = "../architecture-core" }
 graph-analysis = { path = "../graph-analysis" }
 lang-core = { path = "../lang-core" }
 py-analyzer = { path = "../py-analyzer" }
+rs-analyzer = { path = "../rs-analyzer" }
 clap = { version = "4", features = ["derive"] }
 camino = { version = "1", features = ["serde1"] }
 ignore = "0.4"

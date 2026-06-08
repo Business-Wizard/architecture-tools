@@ -72,8 +72,8 @@ mod tests {
         pairs
             .iter()
             .map(|(f, t)| ModuleDep {
-                from: (*f).to_string(),
-                to: (*t).to_string(),
+                from: (*f).into(),
+                to: (*t).into(),
             })
             .collect()
     }

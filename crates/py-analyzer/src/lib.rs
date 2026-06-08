@@ -19,3 +19,24 @@ impl lang_core::LanguageAnalyzer for PythonAnalyzer {
         Ok(module_deps)
     }
 }
+
+impl lang_core::ModuleNamer for PythonAnalyzer {
+    fn file_extension(&self) -> lang_core::FileExtension {
+        lang_core::FileExtension("py")
+    }
+
+    fn path_to_module_name(&self, rel_path: &Path) -> lang_core::ModuleName {
+        let s = rel_path.to_string_lossy();
+        let without_ext = s.strip_suffix(".py").unwrap_or(&s);
+        let is_init = without_ext.ends_with("/__init__") || without_ext == "__init__";
+        let dotted = if is_init {
+            without_ext
+                .strip_suffix("/__init__")
+                .unwrap_or(without_ext)
+                .replace('/', ".")
+        } else {
+            without_ext.replace('/', ".")
+        };
+        lang_core::ModuleName::new(dotted)
+    }
+}

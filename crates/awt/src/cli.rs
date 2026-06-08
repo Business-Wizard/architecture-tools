@@ -24,6 +24,7 @@ pub enum Commands {
 pub enum Language {
     #[default]
     Python,
+    Rust,
 }
 
 #[derive(Parser, Debug)]
@@ -73,8 +74,18 @@ pub fn run() {
 }
 
 fn run_inspect_command(args: &InspectArgs) {
-    let analyzer: Box<dyn lang_core::LanguageAnalyzer> = match args.language {
-        Language::Python => Box::new(py_analyzer::PythonAnalyzer),
+    let (analyzer, namer): (
+        Box<dyn lang_core::LanguageAnalyzer>,
+        Box<dyn lang_core::ModuleNamer>,
+    ) = match args.language {
+        Language::Python => (
+            Box::new(py_analyzer::PythonAnalyzer),
+            Box::new(py_analyzer::PythonAnalyzer),
+        ),
+        Language::Rust => (
+            Box::new(rs_analyzer::RustAnalyzer),
+            Box::new(rs_analyzer::RustAnalyzer),
+        ),
     };
 
     match analyzer.module_deps(args.path.as_std_path()) {
@@ -87,8 +98,9 @@ fn run_inspect_command(args: &InspectArgs) {
                 vec![]
             };
 
-            let source_files = collect_source_files(&args.path);
-            let graph_idx = GraphIndex::build_from_module_deps(&module_deps, &source_files);
+            let source_files = collect_source_files(&args.path, namer.file_extension().as_str());
+            let graph_idx =
+                GraphIndex::build_from_module_deps(&module_deps, &source_files, namer.as_ref());
             let metrics_result = metrics::compute(&graph_idx);
 
             if let Err(e) = dot::write_dot(&graph_idx, &metrics_result, args.dot_out.as_path()) {
@@ -111,12 +123,12 @@ fn run_inspect_command(args: &InspectArgs) {
     }
 }
 
-fn collect_source_files(root: &Utf8PathBuf) -> Vec<Utf8PathBuf> {
+fn collect_source_files(root: &Utf8PathBuf, ext: &str) -> Vec<Utf8PathBuf> {
     WalkBuilder::new(root.as_std_path())
         .hidden(false)
         .build()
         .flatten()
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "py"))
+        .filter(|e| e.path().extension().is_some_and(|e| e == ext))
         .filter_map(|e| {
             let p = camino::Utf8PathBuf::try_from(e.into_path()).ok()?;
             p.strip_prefix(root).ok().map(camino::Utf8Path::to_owned)

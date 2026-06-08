@@ -1,0 +1,20 @@
+[package]
+name = "rs-analyzer"
+version = "0.1.0"
+edition = "2024"
+description = "Rust codebase inspector for awt — extracts intra-crate module dependencies."
+license = "AGPL-3.0-or-later"
+authors = ["Better Bearings"]
+
+[dependencies]
+lang-core = { path = "../lang-core" }
+thiserror = "2.0"
+tree-sitter = "0.25"
+tree-sitter-rust = "0.24"
+ignore = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
