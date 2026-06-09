@@ -12,7 +12,7 @@ pub fn extract(root: &Path) -> Result<Vec<ClassDef>, InspectorError> {
     let rs_files: Vec<_> = Walk::new(root)
         .flatten()
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
-        .map(|e| e.into_path())
+        .map(ignore::DirEntry::into_path)
         .collect();
 
     let mut raw_items: Vec<RawItem> = Vec::new();
@@ -93,10 +93,10 @@ fn collect_raw_items(root: Node<'_>, source: &[u8], module: &str, out: &mut Vec<
     // Collect impl blocks: maps type_name → Vec<trait_name>.
     let mut trait_impls: HashMap<String, Vec<String>> = HashMap::new();
     for child in root.children(&mut root.walk()) {
-        if child.kind() == "impl_item" {
-            if let Some((type_name, trait_name)) = extract_impl_trait(child, source) {
-                trait_impls.entry(type_name).or_default().push(trait_name);
-            }
+        if child.kind() == "impl_item"
+            && let Some((type_name, trait_name)) = extract_impl_trait(child, source)
+        {
+            trait_impls.entry(type_name).or_default().push(trait_name);
         }
     }
 
@@ -152,7 +152,7 @@ fn short_name(s: &str) -> String {
 }
 
 /// Walk the item subtree collecting identifiers that look like type names
-/// (PascalCase) and are in the file's local name set. Skips the item's own name.
+/// (`PascalCase`) and are in the file's local name set. Skips the item's own name.
 fn collect_type_identifiers(
     item: Node<'_>,
     source: &[u8],
@@ -172,12 +172,12 @@ fn collect_type_ids_rec(
     out: &mut Vec<String>,
 ) {
     // Collect `type_identifier` nodes (PascalCase type names in the grammar).
-    if node.kind() == "type_identifier" {
-        if let Ok(text) = node.utf8_text(source) {
-            if text != own_name && local_names.contains(text) {
-                out.push(text.to_string());
-            }
-        }
+    if node.kind() == "type_identifier"
+        && let Ok(text) = node.utf8_text(source)
+        && text != own_name
+        && local_names.contains(text)
+    {
+        out.push(text.to_string());
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {

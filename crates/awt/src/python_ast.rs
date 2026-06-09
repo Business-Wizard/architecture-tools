@@ -1,13 +1,12 @@
 use tree_sitter::{Node, Parser, Tree};
 
-use architecture_core::object_type::ObjectType;
-
 pub struct ParsedFile {
     pub source: Vec<u8>,
     pub tree: Tree,
 }
 
 impl ParsedFile {
+    #[allow(dead_code)]
     pub fn parse(source: &[u8]) -> Option<Self> {
         let mut parser = Parser::new();
         parser
@@ -26,6 +25,7 @@ impl ParsedFile {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ImportInfo {
     pub module_path: String,
 }
@@ -105,12 +105,14 @@ fn has_base_with_name(argument_list: Node<'_>, source: &[u8], target_name: &str)
     false
 }
 
+#[allow(dead_code)]
 pub fn find_imports(parsed: &ParsedFile) -> Vec<ImportInfo> {
     let mut results = Vec::new();
     collect_imports(parsed.root(), &parsed.source, &mut results);
     results
 }
 
+#[allow(dead_code)]
 pub fn extract_module_names(statement: &str) -> Vec<String> {
     let s = statement.trim();
     if let Some(rest) = s.strip_prefix("from ") {
@@ -140,6 +142,7 @@ pub fn extract_module_names(statement: &str) -> Vec<String> {
     }
 }
 
+#[allow(dead_code)]
 fn collect_imports(node: Node<'_>, source: &[u8], out: &mut Vec<ImportInfo>) {
     match node.kind() {
         "import_statement" | "import_from_statement" => {
@@ -155,11 +158,12 @@ fn collect_imports(node: Node<'_>, source: &[u8], out: &mut Vec<ImportInfo>) {
     }
 }
 
-#[must_use]
+#[cfg(test)]
 pub fn parse_objects(parsed: &ParsedFile) -> Vec<ObjectType> {
     part_ast_into_object_types(parsed.root(), &parsed.source)
 }
 
+#[cfg(test)]
 fn part_ast_into_object_types(root: Node<'_>, source: &[u8]) -> Vec<ObjectType> {
     let mut results = Vec::new();
     for i in 0..root.child_count() {
@@ -178,6 +182,7 @@ fn part_ast_into_object_types(root: Node<'_>, source: &[u8]) -> Vec<ObjectType> 
     results
 }
 
+#[cfg(test)]
 fn classify_type_ref(node: Node<'_>, source: &[u8]) -> ObjectType {
     let type_node = node.child_by_field_name("type").unwrap_or(node);
     let text = type_node.utf8_text(source).unwrap_or("");
@@ -188,6 +193,7 @@ fn classify_type_ref(node: Node<'_>, source: &[u8]) -> ObjectType {
     }
 }
 
+#[cfg(test)]
 fn extract_object_params(node: Node<'_>, source: &[u8]) -> Vec<ObjectType> {
     let mut parameters: Vec<ObjectType> = Vec::new();
     let params_node = node.child_by_field_name("parameters").unwrap();
@@ -209,6 +215,7 @@ fn extract_object_params(node: Node<'_>, source: &[u8]) -> Vec<ObjectType> {
     parameters
 }
 
+#[cfg(test)]
 fn extract_python_superclasses(node: Node<'_>, source: &[u8]) -> Vec<String> {
     let Some(superclasses) = node.child_by_field_name("superclasses") else {
         return vec![];
@@ -228,6 +235,7 @@ fn extract_python_superclasses(node: Node<'_>, source: &[u8]) -> Vec<String> {
     bases
 }
 
+#[cfg(test)]
 fn extract_init_object_params(class_node: Node<'_>, source: &[u8]) -> Vec<ObjectType> {
     let Some(body) = class_node.child_by_field_name("body") else {
         return vec![];
@@ -244,6 +252,7 @@ fn extract_init_object_params(class_node: Node<'_>, source: &[u8]) -> Vec<Object
     vec![]
 }
 
+#[cfg(test)]
 fn is_value_object(class_node: Node<'_>, source: &[u8]) -> bool {
     let Some(body) = class_node.child_by_field_name("body") else {
         return true;
@@ -264,6 +273,7 @@ fn is_value_object(class_node: Node<'_>, source: &[u8]) -> bool {
     true
 }
 
+#[cfg(test)]
 fn classify_python_class(node: Node<'_>, source: &[u8]) -> ObjectType {
     let bases = extract_python_superclasses(node, source);
     for base in &bases {
@@ -279,6 +289,9 @@ fn classify_python_class(node: Node<'_>, source: &[u8]) -> ObjectType {
     }
     ObjectType::Class(extract_init_object_params(node, source))
 }
+
+#[cfg(test)]
+use architecture_core::object_type::ObjectType;
 
 #[cfg(test)]
 mod tests {

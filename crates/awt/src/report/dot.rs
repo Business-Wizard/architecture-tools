@@ -128,8 +128,8 @@ mod tests {
     }
 
     /// domain.py imports service.py
-    /// service: fan_in=1, fan_out=0 → I=0.00 (stable)
-    /// domain:  fan_in=0, fan_out=1 → I=1.00 (unstable)
+    /// service: `fan_in=1`, `fan_out=0` → I=0.00 (stable)
+    /// domain:  `fan_in=0`, `fan_out=1` → I=1.00 (unstable)
     fn fixture_one_import() -> GraphIndex {
         let files = vec![
             Utf8PathBuf::from("domain.py"),
@@ -142,7 +142,7 @@ mod tests {
         GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
-    /// test_domain.py imports domain.py — test node should be excluded from output
+    /// `test_domain.py` imports domain.py — test node should be excluded from output
     fn fixture_test_imports_source() -> GraphIndex {
         let files = vec![
             Utf8PathBuf::from("domain.py"),
@@ -172,7 +172,7 @@ mod tests {
     }
 
     /// balanced.py imports domain.py; service.py imports balanced.py
-    /// balanced: fan_in=1, fan_out=1 → I=0.50
+    /// balanced: `fan_in=1`, `fan_out=1` → I=0.50
     fn fixture_balanced_node() -> GraphIndex {
         let files = vec![
             Utf8PathBuf::from("domain.py"),
@@ -193,7 +193,7 @@ mod tests {
     }
 
     /// hub.py imported by a, b, c; hub imports x, y
-    /// hub: fan_in=3, fan_out=2 → I=2/5=0.40
+    /// hub: `fan_in=3`, `fan_out=2` → I=2/5=0.40
     fn fixture_hub_node() -> GraphIndex {
         let files = vec![
             Utf8PathBuf::from("x.py"),
@@ -229,7 +229,7 @@ mod tests {
     }
 
     /// mid.py imported by consumer; mid imports x, y
-    /// mid: fan_in=1, fan_out=2 → I=2/3≈0.67
+    /// mid: `fan_in=1`, `fan_out=2` → I=2/3≈0.67
     fn fixture_mid_node() -> GraphIndex {
         let files = vec![
             Utf8PathBuf::from("x.py"),

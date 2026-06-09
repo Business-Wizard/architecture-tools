@@ -48,6 +48,7 @@ pub type ObjectGraph = DiGraph<ObjectNode, ObjectEdge>;
 pub struct ObjectGraphIndex {
     pub graph: ObjectGraph,
     /// Maps `qualified_name` → `NodeIndex` for external lookups.
+    #[allow(dead_code)]
     pub node_map: HashMap<String, NodeIndex>,
 }
 
