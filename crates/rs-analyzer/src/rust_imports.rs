@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ignore::Walk;
@@ -9,6 +10,7 @@ use crate::error::InspectorError;
 pub fn extract(root: &Path) -> Result<Vec<ModuleDep>, InspectorError> {
     let rs_files = collect_rust_files(root);
     let mut deps = Vec::new();
+    let crate_map = build_crate_map(root);
 
     for file in &rs_files {
         let source = std::fs::read(file)?;
@@ -22,6 +24,7 @@ pub fn extract(root: &Path) -> Result<Vec<ModuleDep>, InspectorError> {
             &source,
             &module_name,
             &crate_root_prefix,
+            &crate_map,
             &mut deps,
         );
     }
@@ -35,6 +38,51 @@ fn collect_rust_files(root: &Path) -> Vec<PathBuf> {
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
         .map(ignore::DirEntry::into_path)
         .collect()
+}
+
+fn build_crate_map(root: &Path) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+
+    Walk::new(root)
+        .flatten()
+        .filter(|e| e.file_name() == "Cargo.toml")
+        .for_each(|entry| {
+            let cargo_path = entry.path();
+            if let Ok(content) = std::fs::read_to_string(cargo_path) {
+                if let Some(name) = extract_crate_name(&content) {
+                    let crate_dir = cargo_path.parent().unwrap_or(root);
+                    let normalized_name = name.replace('-', "_");
+
+                    let lib_path = crate_dir.join("src/lib.rs");
+                    let main_path = crate_dir.join("src/main.rs");
+
+                    if lib_path.exists() {
+                        let module_name = path_to_module_name(&lib_path, root);
+                        map.insert(normalized_name, module_name);
+                    } else if main_path.exists() {
+                        let module_name = path_to_module_name(&main_path, root);
+                        map.insert(normalized_name, module_name);
+                    }
+                }
+            }
+        });
+
+    map
+}
+
+fn extract_crate_name(cargo_content: &str) -> Option<String> {
+    for line in cargo_content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("name") && trimmed.contains('=') {
+            if let Some(quoted) = trimmed.split('=').nth(1) {
+                let name = quoted.trim().trim_matches('"').trim_matches('\'').trim();
+                if !name.is_empty() {
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn path_to_module_name(file: &Path, root: &Path) -> String {
@@ -82,6 +130,7 @@ fn collect_use_deps(
     source: &[u8],
     module_name: &str,
     crate_root: &str,
+    crate_map: &HashMap<String, String>,
     out: &mut Vec<ModuleDep>,
 ) {
     let mut cursor = root.walk();
@@ -89,7 +138,15 @@ fn collect_use_deps(
         match child.kind() {
             "use_declaration" => {
                 if let Some(use_tree) = child.child_by_field_name("argument") {
-                    expand_use_tree(use_tree, source, module_name, crate_root, &[], out);
+                    expand_use_tree(
+                        use_tree,
+                        source,
+                        module_name,
+                        crate_root,
+                        &[],
+                        crate_map,
+                        out,
+                    );
                 }
             }
             "mod_item" => {
@@ -127,6 +184,7 @@ fn expand_use_tree(
     module_name: &str,
     crate_root: &str,
     prefix: &[String],
+    crate_map: &HashMap<String, String>,
     out: &mut Vec<ModuleDep>,
 ) {
     match node.kind() {
@@ -148,7 +206,15 @@ fn expand_use_tree(
                 let mut cursor = list.walk();
                 for item in list.children(&mut cursor) {
                     if item.kind() != "," && item.kind() != "{" && item.kind() != "}" {
-                        expand_use_tree(item, source, module_name, crate_root, &new_prefix, out);
+                        expand_use_tree(
+                            item,
+                            source,
+                            module_name,
+                            crate_root,
+                            &new_prefix,
+                            crate_map,
+                            out,
+                        );
                     }
                 }
             }
@@ -157,14 +223,30 @@ fn expand_use_tree(
             let mut cursor = node.walk();
             for item in node.children(&mut cursor) {
                 if item.kind() != "," && item.kind() != "{" && item.kind() != "}" {
-                    expand_use_tree(item, source, module_name, crate_root, prefix, out);
+                    expand_use_tree(
+                        item,
+                        source,
+                        module_name,
+                        crate_root,
+                        prefix,
+                        crate_map,
+                        out,
+                    );
                 }
             }
         }
         "use_as_clause" => {
             // `X as Y` — extract the path before `as`, ignore the alias.
             if let Some(path_node) = node.child(0) {
-                expand_use_tree(path_node, source, module_name, crate_root, prefix, out);
+                expand_use_tree(
+                    path_node,
+                    source,
+                    module_name,
+                    crate_root,
+                    prefix,
+                    crate_map,
+                    out,
+                );
             }
         }
         "scoped_identifier" | "identifier" | "use_wildcard" => {
@@ -175,7 +257,7 @@ fn expand_use_tree(
             let text = text.trim_end_matches("::*");
             let mut parts = prefix.to_vec();
             parts.extend(text.split("::").map(str::to_owned));
-            emit_dep(&parts, module_name, crate_root, out);
+            emit_dep(&parts, module_name, crate_root, crate_map, out);
         }
         _ => {}
     }
@@ -192,7 +274,13 @@ fn module_parts(parts: &[String]) -> &[String] {
     &parts[..end]
 }
 
-fn emit_dep(parts: &[String], module_name: &str, crate_root: &str, out: &mut Vec<ModuleDep>) {
+fn emit_dep(
+    parts: &[String],
+    module_name: &str,
+    crate_root: &str,
+    crate_map: &HashMap<String, String>,
+    out: &mut Vec<ModuleDep>,
+) {
     let Some(first) = parts.first() else {
         return;
     };
@@ -217,7 +305,18 @@ fn emit_dep(parts: &[String], module_name: &str, crate_root: &str, out: &mut Vec
                 format!("{}.{}", parent, rest.join("."))
             }
         }
-        _ => return, // External crate or `self` — skip.
+        _ => {
+            if let Some(crate_module) = crate_map.get(first.as_str()) {
+                let rest: Vec<&str> = mod_parts[1..].iter().map(String::as_str).collect();
+                if rest.is_empty() {
+                    crate_module.clone()
+                } else {
+                    format!("{}.{}", crate_module, rest.join("."))
+                }
+            } else {
+                return;
+            }
+        }
     };
 
     if to.is_empty() || to == module_name {
@@ -275,7 +374,14 @@ mod tests {
             .iter()
             .map(ToString::to_string)
             .collect();
-        emit_dep(&parts, "crates.awt.src.cli", "crates.awt.src", &mut out);
+        let crate_map = HashMap::new();
+        emit_dep(
+            &parts,
+            "crates.awt.src.cli",
+            "crates.awt.src",
+            &crate_map,
+            &mut out,
+        );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].to.as_str(), "crates.awt.src.graph.coupling_graph");
         assert_eq!(out[0].from.as_str(), "crates.awt.src.cli");
@@ -288,10 +394,12 @@ mod tests {
             .iter()
             .map(ToString::to_string)
             .collect();
+        let crate_map = HashMap::new();
         emit_dep(
             &parts,
             "crates.awt.src.graph.coupling_graph",
             "crates.awt.src",
+            &crate_map,
             &mut out,
         );
         assert_eq!(out.len(), 1);
@@ -305,7 +413,8 @@ mod tests {
             .iter()
             .map(ToString::to_string)
             .collect();
-        emit_dep(&parts, "src.cli", "src", &mut out);
+        let crate_map = HashMap::new();
+        emit_dep(&parts, "src.cli", "src", &crate_map, &mut out);
         assert_eq!(out.len(), 0);
     }
 
@@ -316,7 +425,8 @@ mod tests {
             .iter()
             .map(ToString::to_string)
             .collect();
-        emit_dep(&parts, "src.cli", "src", &mut out);
+        let crate_map = HashMap::new();
+        emit_dep(&parts, "src.cli", "src", &crate_map, &mut out);
         assert_eq!(out.len(), 0);
     }
 
@@ -465,6 +575,86 @@ mod tests {
             deps.len(),
             0,
             "inline mod blocks should not emit deps: {deps:?}"
+        );
+    }
+
+    #[test]
+    fn test_build_crate_map_should_find_workspace_member() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("my-crate/src")).unwrap();
+        std::fs::write(
+            root.join("my-crate/Cargo.toml"),
+            b"[package]\nname = \"my-crate\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("my-crate/src/lib.rs"), b"").unwrap();
+
+        let actual = build_crate_map(root);
+        assert!(
+            actual.contains_key("my_crate"),
+            "expected my_crate key in map: {actual:?}"
+        );
+        assert_eq!(actual["my_crate"], "my-crate.src");
+    }
+
+    #[test]
+    fn test_extract_external_crate_use_should_emit_dep_when_workspace_member() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        std::fs::create_dir_all(root.join("lang-core/src")).unwrap();
+        std::fs::write(
+            root.join("lang-core/Cargo.toml"),
+            b"[package]\nname = \"lang-core\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("lang-core/src/lib.rs"), b"").unwrap();
+
+        std::fs::create_dir_all(root.join("rs-analyzer/src")).unwrap();
+        std::fs::write(
+            root.join("rs-analyzer/Cargo.toml"),
+            b"[package]\nname = \"rs-analyzer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("rs-analyzer/src/lib.rs"),
+            b"use lang_core::LanguageAnalyzer;\n",
+        )
+        .unwrap();
+
+        let deps = extract(root).unwrap();
+        let actual: Vec<(&str, &str)> = deps
+            .iter()
+            .map(|d| (d.from.as_str(), d.to.as_str()))
+            .collect();
+        assert!(
+            actual.contains(&("rs-analyzer.src", "lang-core.src")),
+            "expected edge from rs-analyzer to lang-core not found in {actual:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_third_party_crate_use_should_not_emit_dep() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("rs-analyzer/src")).unwrap();
+        std::fs::write(
+            root.join("rs-analyzer/Cargo.toml"),
+            b"[package]\nname = \"rs-analyzer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("rs-analyzer/src/lib.rs"),
+            b"use petgraph::algo::tarjan_scc;\n",
+        )
+        .unwrap();
+
+        let deps = extract(root).unwrap();
+        let petgraph_deps: Vec<_> = deps.iter().filter(|d| d.to.contains("petgraph")).collect();
+        assert!(
+            petgraph_deps.is_empty(),
+            "should not emit edge to third-party petgraph: {deps:?}"
         );
     }
 }
