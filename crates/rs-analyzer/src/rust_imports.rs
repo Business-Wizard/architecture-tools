@@ -86,13 +86,38 @@ fn collect_use_deps(
 ) {
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
-        if child.kind() == "use_declaration" {
-            // The subtree of a use_declaration is the use_tree child.
-            if let Some(use_tree) = child.child_by_field_name("argument") {
-                expand_use_tree(use_tree, source, module_name, crate_root, &[], out);
+        match child.kind() {
+            "use_declaration" => {
+                if let Some(use_tree) = child.child_by_field_name("argument") {
+                    expand_use_tree(use_tree, source, module_name, crate_root, &[], out);
+                }
             }
+            "mod_item" => {
+                collect_mod_dep(child, source, module_name, out);
+            }
+            _ => {}
         }
     }
+}
+
+fn collect_mod_dep(node: Node<'_>, source: &[u8], module_name: &str, out: &mut Vec<ModuleDep>) {
+    let has_body = node
+        .children(&mut node.walk())
+        .any(|c| c.kind() == "declaration_list");
+    if has_body {
+        return;
+    }
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Ok(name) = name_node.utf8_text(source) else {
+        return;
+    };
+    let to = format!("{module_name}.{name}");
+    out.push(ModuleDep {
+        from: module_name.into(),
+        to: to.into(),
+    });
 }
 
 // Recursively expand a use_tree node, accumulating path components.
@@ -400,6 +425,46 @@ mod tests {
         assert!(
             actual.contains(&("src.cli", "src.graph.coupling_graph")),
             "{actual:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_mod_declaration_should_emit_dep() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.rs"), b"mod cli;\n").unwrap();
+        std::fs::write(root.join("src/cli.rs"), b"").unwrap();
+
+        let deps = extract(root).unwrap();
+        let actual: Vec<(&str, &str)> = deps
+            .iter()
+            .map(|d| (d.from.as_str(), d.to.as_str()))
+            .collect();
+        assert!(
+            actual
+                .iter()
+                .any(|(from, to)| from.contains("src") && to.ends_with(".cli")),
+            "expected mod dependency not found in {actual:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_mod_inline_block_should_not_emit_dep() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            b"mod utils {\n    fn foo() {}\n}\n",
+        )
+        .unwrap();
+
+        let deps = extract(root).unwrap();
+        assert_eq!(
+            deps.len(),
+            0,
+            "inline mod blocks should not emit deps: {deps:?}"
         );
     }
 }
