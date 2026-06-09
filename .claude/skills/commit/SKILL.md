@@ -46,6 +46,7 @@ Inspect the current working copy changes, generate a conventional commit message
 - No trailing period
 - Max 50 characters (72 hard limit)
 - Lowercase after the colon
+- Use `impl` instead of "implement"
 
 ## Hard Rules
 
