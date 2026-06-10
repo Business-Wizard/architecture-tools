@@ -45,7 +45,7 @@ pub fn extract(root: &Path) -> Result<Vec<ClassDef>, InspectorError> {
 
     let defs = raw_items
         .into_iter()
-        .map(|ri| resolve_deps(ri, &short_names, &qualified_set, &short_to_qualified))
+        .map(|ri| resolve_deps(ri, &short_names, &short_to_qualified))
         .collect();
 
     Ok(defs)
@@ -230,7 +230,6 @@ fn collect_type_ids_rec(
 fn resolve_deps(
     ri: RawItem,
     short_names: &HashSet<String>,
-    qualified_set: &HashSet<String>,
     short_to_qualified: &HashMap<&str, Vec<&str>>,
 ) -> ClassDef {
     // Qualify referenced names using the same unambiguous-single-match strategy.
@@ -245,17 +244,11 @@ fn resolve_deps(
     class_deps.sort();
 
     // bases: trait names for structs/enums, empty for traits themselves.
-    // Only include trait names that exist in the codebase (in qualified_set).
+    // Qualify trait names through resolve_candidate so object_graph can find them in node_map.
     let bases: Vec<String> = ri
         .trait_impls
         .into_iter()
-        .filter(|t| {
-            qualified_set.iter().any(|q| {
-                q.rsplit('.')
-                    .next()
-                    .is_some_and(|short| short == t.as_str())
-            })
-        })
+        .filter_map(|t| resolve_candidate(&t, &ri.module, short_to_qualified))
         .collect();
 
     let kind_marker = match ri.kind {
@@ -390,7 +383,7 @@ mod tests {
         )]);
         let defs = extract(pkg.path()).unwrap();
         let sql_repo = defs.iter().find(|d| d.name == "SqlRepo").unwrap();
-        assert!(sql_repo.bases.contains(&"Repo".to_string()));
+        assert!(sql_repo.bases.iter().any(|b| b.ends_with(".Repo")));
     }
 
     #[test]
@@ -457,5 +450,24 @@ mod tests {
         let defs = extract(pkg.path()).unwrap();
         let svc = defs.iter().find(|d| d.name == "Service").unwrap();
         assert!(svc.class_deps.is_empty());
+    }
+
+    #[test]
+    fn test_extract_trait_impl_cross_file_should_produce_qualified_base() {
+        let pkg = write_pkg(&[
+            ("traits.rs", "pub trait InstabilityStrategy {}\n"),
+            (
+                "impls.rs",
+                "pub struct ConcreteStrategy;\nimpl InstabilityStrategy for ConcreteStrategy {}\n",
+            ),
+        ]);
+        let defs = extract(pkg.path()).unwrap();
+        let concrete = defs.iter().find(|d| d.name == "ConcreteStrategy").unwrap();
+        assert!(
+            concrete
+                .bases
+                .iter()
+                .any(|b| b.ends_with(".InstabilityStrategy"))
+        );
     }
 }
