@@ -95,7 +95,6 @@ dependencies = [
  "clap",
  "colored",
  "comfy-table",
- "graph-analysis",
  "ignore",
  "lang-core",
  "petgraph",
@@ -594,15 +593,6 @@ dependencies = [
  "log",
  "regex-automata",
  "regex-syntax",
-]
-
-[[package]]
-name = "graph-analysis"
-version = "0.1.0"
-dependencies = [
- "lang-core",
- "petgraph",
- "serde",
 ]
 
 [[package]]

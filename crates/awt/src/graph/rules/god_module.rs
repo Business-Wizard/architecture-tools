@@ -2,13 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use lang_core::ModuleDep;
 
-use crate::model::{GraphRuleId, GraphSeverity, GraphViolation, ViolationKind};
+use crate::graph::violations::{GraphRuleId, GraphSeverity, GraphViolation, ViolationKind};
 
 const MIN_GOD_THRESHOLD: usize = 3;
 
 #[must_use]
 pub fn check(deps: &[ModuleDep]) -> Vec<GraphViolation> {
-    // Count unique imports per module (deduplicate (from, to) pairs).
     let mut fan_out: HashMap<&str, HashSet<&str>> = HashMap::new();
     for dep in deps {
         fan_out
@@ -86,7 +85,6 @@ mod tests {
 
     #[test]
     fn test_god_module_above_threshold_should_produce_violation() {
-        // Most modules import 1 other; "god" imports 10 — clear outlier above mean+2σ.
         let mut deps: Vec<(&str, &str)> = vec![
             ("m1", "x1"),
             ("m2", "x2"),
@@ -104,7 +102,6 @@ mod tests {
 
     #[test]
     fn test_god_module_duplicate_edges_should_count_unique_imports_only() {
-        // Same target repeated — should count as 1.
         let actual = check(&make_deps(&[("god", "a"), ("god", "a"), ("god", "a")]));
         assert_eq!(actual, vec![]);
     }

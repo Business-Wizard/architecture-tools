@@ -101,7 +101,7 @@ fn run_inspect_command(args: &InspectArgs) {
     match analyzer.module_deps(args.path.as_std_path()) {
         Ok(module_deps) => {
             let violations = if args.violations {
-                let v = ::graph_analysis::analyze(&module_deps);
+                let v = crate::graph::analyze(&module_deps);
                 terminal::print_graph_violations_section(&v, &args.path);
                 v
             } else {

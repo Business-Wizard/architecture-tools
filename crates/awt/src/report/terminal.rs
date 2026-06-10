@@ -1,4 +1,4 @@
-use ::graph_analysis::{GraphSeverity, GraphViolation, ViolationKind};
+use crate::graph::violations::{GraphSeverity, GraphViolation, ViolationKind};
 
 pub fn print_graph_violations_section(violations: &[GraphViolation], root: &camino::Utf8Path) {
     if violations.is_empty() {

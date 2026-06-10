@@ -4,7 +4,7 @@ use lang_core::ModuleDep;
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::DiGraph;
 
-use crate::model::{GraphRuleId, GraphSeverity, GraphViolation, ViolationKind};
+use crate::graph::violations::{GraphRuleId, GraphSeverity, GraphViolation, ViolationKind};
 
 const MIN_CYCLE_SIZE: usize = 2;
 
@@ -80,7 +80,6 @@ mod tests {
 
     #[test]
     fn test_self_loop_should_not_produce_violation() {
-        // A single node in its own SCC is not a cycle between modules.
         let actual = check(&make_deps(&[("a", "a")]));
         assert_eq!(actual, vec![]);
     }

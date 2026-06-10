@@ -4,7 +4,7 @@ mod module_hub;
 
 use lang_core::ModuleDep;
 
-use crate::model::{GraphSeverity, GraphViolation};
+use crate::graph::violations::{GraphSeverity, GraphViolation};
 
 #[must_use]
 pub fn run_all(deps: &[ModuleDep]) -> Vec<GraphViolation> {

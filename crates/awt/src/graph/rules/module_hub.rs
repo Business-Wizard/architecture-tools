@@ -2,13 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use lang_core::ModuleDep;
 
-use crate::model::{GraphRuleId, GraphSeverity, GraphViolation, ViolationKind};
+use crate::graph::violations::{GraphRuleId, GraphSeverity, GraphViolation, ViolationKind};
 
 const MIN_HUB_THRESHOLD: usize = 3;
 
 #[must_use]
 pub fn check(deps: &[ModuleDep]) -> Vec<GraphViolation> {
-    // Count unique importers per module (deduplicate (from, to) pairs).
     let mut fan_in: HashMap<&str, HashSet<&str>> = HashMap::new();
     for dep in deps {
         fan_in
@@ -86,7 +85,6 @@ mod tests {
 
     #[test]
     fn test_hub_above_threshold_should_produce_violation() {
-        // Most modules imported by 1 other; "hub" imported by 10 — clear outlier above mean+2σ.
         let mut deps: Vec<(&str, &str)> = vec![
             ("x1", "m1"),
             ("x2", "m2"),
@@ -104,14 +102,12 @@ mod tests {
 
     #[test]
     fn test_hub_duplicate_edges_should_count_unique_importers_only() {
-        // Same importer repeated — should count as 1.
         let actual = check(&make_deps(&[("a", "hub"), ("a", "hub"), ("a", "hub")]));
         assert_eq!(actual, vec![]);
     }
 
     #[test]
     fn test_hub_below_threshold_should_produce_no_violation() {
-        // Only 1 importer — well below any threshold.
         let actual = check(&make_deps(&[("a", "hub")]));
         assert_eq!(actual, vec![]);
     }

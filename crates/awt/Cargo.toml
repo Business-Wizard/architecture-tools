@@ -8,7 +8,6 @@ authors = ["Better Bearings"]
 
 [dependencies]
 architecture-core = { path = "../architecture-core" }
-graph-analysis = { path = "../graph-analysis" }
 lang-core = { path = "../lang-core" }
 py-analyzer = { path = "../py-analyzer" }
 rs-analyzer = { path = "../rs-analyzer" }
