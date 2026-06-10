@@ -48,21 +48,21 @@ fn build_crate_map(root: &Path) -> HashMap<String, String> {
         .filter(|e| e.file_name() == "Cargo.toml")
         .for_each(|entry| {
             let cargo_path = entry.path();
-            if let Ok(content) = std::fs::read_to_string(cargo_path) {
-                if let Some(name) = extract_crate_name(&content) {
-                    let crate_dir = cargo_path.parent().unwrap_or(root);
-                    let normalized_name = name.replace('-', "_");
+            if let Ok(content) = std::fs::read_to_string(cargo_path)
+                && let Some(name) = extract_crate_name(&content)
+            {
+                let crate_dir = cargo_path.parent().unwrap_or(root);
+                let normalized_name = name.replace('-', "_");
 
-                    let lib_path = crate_dir.join("src/lib.rs");
-                    let main_path = crate_dir.join("src/main.rs");
+                let lib_path = crate_dir.join("src/lib.rs");
+                let main_path = crate_dir.join("src/main.rs");
 
-                    if lib_path.exists() {
-                        let module_name = path_to_module_name(&lib_path, root);
-                        map.insert(normalized_name, module_name);
-                    } else if main_path.exists() {
-                        let module_name = path_to_module_name(&main_path, root);
-                        map.insert(normalized_name, module_name);
-                    }
+                if lib_path.exists() {
+                    let module_name = path_to_module_name(&lib_path, root);
+                    map.insert(normalized_name, module_name);
+                } else if main_path.exists() {
+                    let module_name = path_to_module_name(&main_path, root);
+                    map.insert(normalized_name, module_name);
                 }
             }
         });
@@ -73,12 +73,13 @@ fn build_crate_map(root: &Path) -> HashMap<String, String> {
 fn extract_crate_name(cargo_content: &str) -> Option<String> {
     for line in cargo_content.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("name") && trimmed.contains('=') {
-            if let Some(quoted) = trimmed.split('=').nth(1) {
-                let name = quoted.trim().trim_matches('"').trim_matches('\'').trim();
-                if !name.is_empty() {
-                    return Some(name.to_string());
-                }
+        if trimmed.starts_with("name")
+            && trimmed.contains('=')
+            && let Some(quoted) = trimmed.split('=').nth(1)
+        {
+            let name = quoted.trim().trim_matches('"').trim_matches('\'').trim();
+            if !name.is_empty() {
+                return Some(name.to_string());
             }
         }
     }
@@ -552,9 +553,12 @@ mod tests {
             .map(|d| (d.from.as_str(), d.to.as_str()))
             .collect();
         assert!(
-            actual
-                .iter()
-                .any(|(from, to)| from.contains("src") && to.ends_with(".cli")),
+            actual.iter().any(|(from, to)| {
+                from.contains("src")
+                    && std::path::Path::new(to)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("cli"))
+            }),
             "expected mod dependency not found in {actual:?}"
         );
     }
