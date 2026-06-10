@@ -37,7 +37,18 @@ pub fn extract(root: &Path) -> Result<Vec<ModuleDep>, InspectorError> {
             &ctx,
             &mut deps,
         );
+        collect_path_expr_deps(
+            tree.root_node(),
+            &source,
+            &module_name,
+            &crate_root_prefix,
+            &ctx,
+            &mut deps,
+        );
     }
+
+    deps.sort_by(|a, b| (a.from.as_str(), a.to.as_str()).cmp(&(b.from.as_str(), b.to.as_str())));
+    deps.dedup_by(|a, b| a.from == b.from && a.to == b.to);
 
     Ok(deps)
 }
@@ -284,6 +295,40 @@ fn collect_use_deps(
             }
             _ => {}
         }
+    }
+}
+
+fn collect_path_expr_deps(
+    root: Node<'_>,
+    source: &[u8],
+    module_name: &str,
+    crate_root: &str,
+    ctx: &ResolveCtx<'_>,
+    out: &mut Vec<ModuleDep>,
+) {
+    collect_path_expr_deps_recursive(root, source, module_name, crate_root, ctx, out);
+}
+
+fn collect_path_expr_deps_recursive(
+    node: Node<'_>,
+    source: &[u8],
+    module_name: &str,
+    crate_root: &str,
+    ctx: &ResolveCtx<'_>,
+    out: &mut Vec<ModuleDep>,
+) {
+    if matches!(node.kind(), "scoped_identifier" | "scoped_type_identifier")
+        && let Ok(text) = node.utf8_text(source)
+        && let Some(first) = text.split("::").next()
+        && ctx.crate_map.contains_key(first)
+    {
+        let parts: Vec<String> = text.split("::").map(str::to_owned).collect();
+        emit_dep(&parts, module_name, crate_root, ctx, out);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_path_expr_deps_recursive(child, source, module_name, crate_root, ctx, out);
     }
 }
 
@@ -907,6 +952,100 @@ mod tests {
         assert!(
             !actual.iter().any(|(_, to)| *to == "lang-core.src"),
             "should not emit lib edge, got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_bare_path_expr_should_emit_dep_to_workspace_crate() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("rs-crate/src")).unwrap();
+        std::fs::write(
+            root.join("rs-crate/Cargo.toml"),
+            b"[package]\nname = \"rs-crate\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("rs-crate/src/lib.rs"), b"pub struct Foo;").unwrap();
+        std::fs::create_dir_all(root.join("consumer/src")).unwrap();
+        std::fs::write(
+            root.join("consumer/Cargo.toml"),
+            b"[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("consumer/src/main.rs"),
+            b"fn main() { rs_crate::Foo {}; }\n",
+        )
+        .unwrap();
+
+        let deps = extract(root).unwrap();
+        let actual: Vec<(&str, &str)> = deps
+            .iter()
+            .map(|d| (d.from.as_str(), d.to.as_str()))
+            .collect();
+        assert!(
+            actual.contains(&("consumer.src", "rs-crate.src")),
+            "expected edge consumer.src -> rs-crate.src not found in {actual:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_bare_path_expr_repeated_should_emit_single_dep() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("rs-crate/src")).unwrap();
+        std::fs::write(
+            root.join("rs-crate/Cargo.toml"),
+            b"[package]\nname = \"rs-crate\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("rs-crate/src/lib.rs"), b"pub struct Foo;").unwrap();
+        std::fs::create_dir_all(root.join("consumer/src")).unwrap();
+        std::fs::write(
+            root.join("consumer/Cargo.toml"),
+            b"[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("consumer/src/main.rs"),
+            b"fn main() { rs_crate::Foo {}; rs_crate::Foo {}; rs_crate::Foo {}; }\n",
+        )
+        .unwrap();
+
+        let deps = extract(root).unwrap();
+        let matching: Vec<_> = deps
+            .iter()
+            .filter(|d| d.from.as_str() == "consumer.src" && d.to.as_str() == "rs-crate.src")
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "expected exactly 1 edge, got {} in {deps:?}",
+            matching.len()
+        );
+    }
+
+    #[test]
+    fn test_extract_bare_path_expr_third_party_should_not_emit() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("consumer/src")).unwrap();
+        std::fs::write(
+            root.join("consumer/Cargo.toml"),
+            b"[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("consumer/src/main.rs"),
+            b"fn main() { petgraph::Graph::new(); }\n",
+        )
+        .unwrap();
+
+        let deps = extract(root).unwrap();
+        let petgraph_deps: Vec<_> = deps.iter().filter(|d| d.to.contains("petgraph")).collect();
+        assert!(
+            petgraph_deps.is_empty(),
+            "should not emit edge to third-party petgraph: {deps:?}"
         );
     }
 }
