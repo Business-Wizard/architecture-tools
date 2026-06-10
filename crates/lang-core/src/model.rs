@@ -47,28 +47,6 @@ impl std::fmt::Display for ModuleName {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FileExtension(pub &'static str);
-
-impl FileExtension {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        self.0
-    }
-}
-
-impl AsRef<str> for FileExtension {
-    fn as_ref(&self) -> &str {
-        self.0
-    }
-}
-
-impl std::fmt::Display for FileExtension {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.0)
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleDep {
     pub from: ModuleName,

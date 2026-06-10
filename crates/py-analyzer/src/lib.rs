@@ -32,8 +32,8 @@ impl lang_core::ObjectAnalyzer for PythonAnalyzer {
 }
 
 impl lang_core::ModuleNamer for PythonAnalyzer {
-    fn file_extension(&self) -> lang_core::FileExtension {
-        lang_core::FileExtension("py")
+    fn file_extension(&self) -> &'static str {
+        "py"
     }
 
     fn path_to_module_name(&self, rel_path: &Path) -> lang_core::ModuleName {

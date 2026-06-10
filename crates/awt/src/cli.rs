@@ -108,7 +108,7 @@ fn run_inspect_command(args: &InspectArgs) {
                 vec![]
             };
 
-            let source_files = collect_source_files(&args.path, namer.file_extension().as_str());
+            let source_files = collect_source_files(&args.path, namer.file_extension());
             let graph_idx =
                 GraphIndex::build_from_module_deps(&module_deps, &source_files, namer.as_ref());
             let metrics_result = metrics::compute(&graph_idx);
