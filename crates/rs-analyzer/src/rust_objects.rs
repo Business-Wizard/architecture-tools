@@ -100,14 +100,14 @@ fn collect_raw_items(root: Node<'_>, source: &[u8], module: &str, out: &mut Vec<
             let type_node = child
                 .child_by_field_name("type")
                 .or_else(|| child.child_by_field_name("trait"));
-            if let Some(type_node) = type_node {
-                if let Ok(raw) = type_node.utf8_text(source) {
-                    let type_name = short_name(raw);
-                    impl_bodies
-                        .entry(type_name.clone())
-                        .or_default()
-                        .push(child);
-                }
+            if let Some(type_node) = type_node
+                && let Ok(raw) = type_node.utf8_text(source)
+            {
+                let type_name = short_name(raw);
+                impl_bodies
+                    .entry(type_name.clone())
+                    .or_default()
+                    .push(child);
             }
             if let Some((type_name, trait_name)) = extract_impl_trait(child, source) {
                 trait_impls.entry(type_name).or_default().push(trait_name);
@@ -488,9 +488,15 @@ impl GraphIndex {\n\
         )]);
         let defs = extract(pkg.path()).unwrap();
         let gi = defs.iter().find(|d| d.name == "GraphIndex").unwrap();
-        let deps: Vec<&str> = gi.class_deps.iter().map(String::as_str).collect();
-        assert!(deps.iter().any(|d| d.ends_with(".ParsedFile")), "{deps:?}");
-        assert!(deps.iter().any(|d| d.ends_with(".ClassInfo")), "{deps:?}");
+        let class_deps: Vec<&str> = gi.class_deps.iter().map(String::as_str).collect();
+        assert!(
+            class_deps.iter().any(|d| d.ends_with(".ParsedFile")),
+            "{class_deps:?}"
+        );
+        assert!(
+            class_deps.iter().any(|d| d.ends_with(".ClassInfo")),
+            "{class_deps:?}"
+        );
     }
 
     #[test]
