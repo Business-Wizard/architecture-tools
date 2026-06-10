@@ -91,12 +91,27 @@ fn collect_raw_items(root: Node<'_>, source: &[u8], module: &str, out: &mut Vec<
         .collect();
 
     // Collect impl blocks: maps type_name → Vec<trait_name>.
+    // Also maps type_name → Vec<impl_item node> for signature scanning.
     let mut trait_impls: HashMap<String, Vec<String>> = HashMap::new();
+    let mut impl_bodies: HashMap<String, Vec<Node<'_>>> = HashMap::new();
     for child in root.children(&mut root.walk()) {
-        if child.kind() == "impl_item"
-            && let Some((type_name, trait_name)) = extract_impl_trait(child, source)
-        {
-            trait_impls.entry(type_name).or_default().push(trait_name);
+        if child.kind() == "impl_item" {
+            // Extract the implementing type name regardless of whether a trait is present.
+            let type_node = child
+                .child_by_field_name("type")
+                .or_else(|| child.child_by_field_name("trait"));
+            if let Some(type_node) = type_node {
+                if let Ok(raw) = type_node.utf8_text(source) {
+                    let type_name = short_name(raw);
+                    impl_bodies
+                        .entry(type_name.clone())
+                        .or_default()
+                        .push(child);
+                }
+            }
+            if let Some((type_name, trait_name)) = extract_impl_trait(child, source) {
+                trait_impls.entry(type_name).or_default().push(trait_name);
+            }
         }
     }
 
@@ -112,7 +127,14 @@ fn collect_raw_items(root: Node<'_>, source: &[u8], module: &str, out: &mut Vec<
             continue;
         };
 
-        let referenced_names = collect_type_identifiers(child, source, &local_names);
+        let mut referenced_names = collect_type_identifiers(child, source, &local_names);
+        // Also scan method signatures in all impl blocks for this type.
+        if let Some(bodies) = impl_bodies.get(&name) {
+            for impl_node in bodies {
+                let from_impl = collect_type_identifiers(*impl_node, source, &local_names);
+                referenced_names.extend(from_impl);
+            }
+        }
         let impls = trait_impls.get(&name).cloned().unwrap_or_default();
 
         out.push(RawItem {
@@ -450,6 +472,25 @@ mod tests {
         let defs = extract(pkg.path()).unwrap();
         let svc = defs.iter().find(|d| d.name == "Service").unwrap();
         assert!(svc.class_deps.is_empty());
+    }
+
+    #[test]
+    fn test_extract_impl_method_signature_types_should_produce_dep_edges() {
+        let pkg = write_pkg(&[(
+            "domain.rs",
+            "\
+pub struct GraphIndex;\n\
+pub struct ParsedFile;\n\
+pub struct ClassInfo;\n\
+impl GraphIndex {\n\
+    pub fn build(file: &ParsedFile) -> ClassInfo { todo!() }\n\
+}\n",
+        )]);
+        let defs = extract(pkg.path()).unwrap();
+        let gi = defs.iter().find(|d| d.name == "GraphIndex").unwrap();
+        let deps: Vec<&str> = gi.class_deps.iter().map(String::as_str).collect();
+        assert!(deps.iter().any(|d| d.ends_with(".ParsedFile")), "{deps:?}");
+        assert!(deps.iter().any(|d| d.ends_with(".ClassInfo")), "{deps:?}");
     }
 
     #[test]
