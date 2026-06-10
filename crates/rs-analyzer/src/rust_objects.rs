@@ -151,6 +151,48 @@ fn short_name(s: &str) -> String {
     s.rsplit("::").next().unwrap_or(s).trim().to_string()
 }
 
+/// Extract the crate prefix (up to and including "src") from a dotted module path.
+/// E.g. `"crates.awt.src.graph.object_graph"` → `"crates.awt.src"`
+fn crate_prefix_of(module: &str) -> String {
+    let mut acc = String::new();
+    for part in module.split('.') {
+        if !acc.is_empty() {
+            acc.push('.');
+        }
+        acc.push_str(part);
+        if part == "src" {
+            return acc;
+        }
+    }
+    module.split('.').next().unwrap_or("").to_owned()
+}
+
+/// Resolve a short type name to its qualified name, preferring same-crate candidates.
+/// Returns the unique candidate if exactly one exists.
+/// If multiple candidates exist, returns one from the same crate (by prefix).
+/// Returns None if ambiguous (multiple same-crate candidates or no candidates).
+fn resolve_candidate(
+    short: &str,
+    item_module: &str,
+    short_to_qualified: &HashMap<&str, Vec<&str>>,
+) -> Option<String> {
+    let candidates = short_to_qualified.get(short)?;
+    if candidates.len() == 1 {
+        return Some(candidates[0].to_string());
+    }
+    let prefix = crate_prefix_of(item_module);
+    let same_crate: Vec<&str> = candidates
+        .iter()
+        .copied()
+        .filter(|q| q.starts_with(prefix.as_str()))
+        .collect();
+    if same_crate.len() == 1 {
+        Some(same_crate[0].to_string())
+    } else {
+        None
+    }
+}
+
 /// Walk the item subtree collecting identifiers that look like type names
 /// (`PascalCase`) and are in the file's local name set. Skips the item's own name.
 fn collect_type_identifiers(
@@ -196,10 +238,7 @@ fn resolve_deps(
         .referenced_names
         .iter()
         .filter(|n| *n != &ri.name && short_names.contains(*n))
-        .filter_map(|n| match short_to_qualified.get(n.as_str()) {
-            Some(candidates) if candidates.len() == 1 => Some(candidates[0].to_string()),
-            _ => None,
-        })
+        .filter_map(|n| resolve_candidate(n, &ri.module, short_to_qualified))
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -251,7 +290,11 @@ mod tests {
     fn write_pkg(files: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tmp dir");
         for (name, src) in files {
-            std::fs::write(dir.path().join(name), src).expect("write");
+            let path = dir.path().join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create dir");
+            }
+            std::fs::write(path, src).expect("write");
         }
         dir
     }
@@ -374,5 +417,45 @@ mod tests {
         let defs = extract(pkg.path()).unwrap();
         let node = defs.iter().find(|d| d.name == "Node").unwrap();
         assert!(node.class_deps.is_empty());
+    }
+
+    #[test]
+    fn test_crate_prefix_of_with_src_segment_should_return_prefix_up_to_src() {
+        assert_eq!(
+            crate_prefix_of("crates.awt.src.graph.object_graph"),
+            "crates.awt.src"
+        );
+        assert_eq!(crate_prefix_of("src.model"), "src");
+        assert_eq!(crate_prefix_of("mylib"), "mylib");
+    }
+
+    #[test]
+    fn test_resolve_deps_same_crate_wins_when_name_exists_in_two_crates_should_produce_edge() {
+        let pkg = write_pkg(&[
+            (
+                "crate_a/src/types.rs",
+                "pub enum ObjectKind { A }\npub struct ObjectNode { pub kind: ObjectKind }\n",
+            ),
+            ("crate_b/src/types.rs", "pub enum ObjectKind { B }\n"),
+        ]);
+        let defs = extract(pkg.path()).unwrap();
+        let node = defs.iter().find(|d| d.name == "ObjectNode").unwrap();
+        assert_eq!(node.class_deps.len(), 1);
+        assert!(node.class_deps[0].contains("crate_a"));
+    }
+
+    #[test]
+    fn test_resolve_deps_cross_crate_ambiguous_with_no_local_winner_should_drop_dep() {
+        let pkg = write_pkg(&[
+            ("crate_a/src/types.rs", "pub struct Widget;\n"),
+            ("crate_b/src/types.rs", "pub struct Widget;\n"),
+            (
+                "crate_c/src/service.rs",
+                "pub struct Service { pub w: Widget }\n",
+            ),
+        ]);
+        let defs = extract(pkg.path()).unwrap();
+        let svc = defs.iter().find(|d| d.name == "Service").unwrap();
+        assert!(svc.class_deps.is_empty());
     }
 }

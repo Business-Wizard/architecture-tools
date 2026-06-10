@@ -17,7 +17,7 @@ impl ObjectKind {
             let short = base.split('.').next_back().unwrap_or(base.as_str());
             match short {
                 "Protocol" => return Self::Interface,
-                "ABC" | "ABCMeta" => return Self::TraitLike,
+                "ABC" | "ABCMeta" | "Trait" => return Self::TraitLike,
                 _ => {}
             }
         }
@@ -170,5 +170,13 @@ mod tests {
             .filter(|e| e.weight.kind == EdgeKind::Inherits)
             .count();
         assert_eq!(inherits, 1);
+    }
+
+    #[test]
+    fn test_rust_trait_marker_should_set_kind_traitlike() {
+        let defs = vec![make_def("domain", "MyTrait", vec!["Trait"], vec![])];
+        let idx = ObjectGraphIndex::build_from_class_defs(&defs);
+        let node = &idx.graph[idx.node_map["domain.MyTrait"]];
+        assert_eq!(node.kind, ObjectKind::TraitLike);
     }
 }
