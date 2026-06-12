@@ -4,7 +4,7 @@ use std::path::Path;
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::error::InspectorError;
-use crate::model::{ClassDef, ModuleDep};
+use lang_core::{ClassDef, ModuleDep};
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -18,7 +18,8 @@ pub fn extract(package_path: &Path) -> Result<(Vec<ModuleDep>, Vec<ClassDef>), I
 
     for file in &py_files {
         let source = std::fs::read(file).map_err(InspectorError::Io)?;
-        let module_name = path_to_module_name(file, package_path);
+        let rel = file.strip_prefix(package_path).unwrap_or(file);
+        let module_name = path_to_module_name(rel);
 
         let Some(parsed) = ParsedFile::parse(&source) else {
             continue;
@@ -65,9 +66,11 @@ fn collect_python_files(root: &Path) -> Result<Vec<std::path::PathBuf>, Inspecto
 // Mirrors architecture_builder::path_to_qualified_name in the awt crate.
 // ---------------------------------------------------------------------------
 
-fn path_to_module_name(file: &Path, root: &Path) -> String {
-    let rel = file.strip_prefix(root).unwrap_or(file);
-    let without_ext = rel.to_string_lossy().trim_end_matches(".py").to_string();
+pub(crate) fn path_to_module_name(rel_path: &Path) -> String {
+    let without_ext = rel_path
+        .to_string_lossy()
+        .trim_end_matches(".py")
+        .to_string();
     let dotted = without_ext.replace(['/', '\\'], ".");
     dotted
         .strip_suffix(".__init__")
@@ -468,14 +471,16 @@ mod tests {
     fn test_path_to_module_name_init_file_should_resolve_to_package_name() {
         let root = std::path::Path::new("/repo");
         let file = std::path::Path::new("/repo/myapp/domain/__init__.py");
-        assert_eq!(path_to_module_name(file, root), "myapp.domain");
+        let rel = file.strip_prefix(root).unwrap_or(file);
+        assert_eq!(path_to_module_name(rel), "myapp.domain");
     }
 
     #[test]
     fn test_path_to_module_name_regular_file_should_resolve_to_dotted_path() {
         let root = std::path::Path::new("/repo");
         let file = std::path::Path::new("/repo/myapp/domain/order.py");
-        assert_eq!(path_to_module_name(file, root), "myapp.domain.order");
+        let rel = file.strip_prefix(root).unwrap_or(file);
+        assert_eq!(path_to_module_name(rel), "myapp.domain.order");
     }
 
     #[test]

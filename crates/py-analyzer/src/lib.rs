@@ -1,9 +1,7 @@
 mod error;
-mod model;
 mod python_imports;
 
 pub use error::InspectorError;
-pub use lang_core::ModuleDep;
 
 use std::path::Path;
 
@@ -37,17 +35,7 @@ impl lang_core::ModuleNamer for PythonAnalyzer {
     }
 
     fn path_to_module_name(&self, rel_path: &Path) -> lang_core::ModuleName {
-        let s = rel_path.to_string_lossy();
-        let without_ext = s.strip_suffix(".py").unwrap_or(&s);
-        let is_init = without_ext.ends_with("/__init__") || without_ext == "__init__";
-        let dotted = if is_init {
-            without_ext
-                .strip_suffix("/__init__")
-                .unwrap_or(without_ext)
-                .replace('/', ".")
-        } else {
-            without_ext.replace('/', ".")
-        };
+        let dotted = python_imports::path_to_module_name(rel_path);
         lang_core::ModuleName::new(dotted)
     }
 }
