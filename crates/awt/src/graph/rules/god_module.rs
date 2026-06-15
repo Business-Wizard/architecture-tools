@@ -1,39 +1,35 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
-use lang_core::ModuleDep;
+use architecture_core::model::{ArchitectureGraph, ModuleId};
 
 use crate::graph::violations::{GraphRuleId, GraphSeverity, GraphViolation, ViolationKind};
 
 const MIN_GOD_THRESHOLD: usize = 3;
 
 #[must_use]
-pub fn check(deps: &[ModuleDep]) -> Vec<GraphViolation> {
-    let mut fan_out: HashMap<&str, HashSet<&str>> = HashMap::new();
-    for dep in deps {
-        fan_out
-            .entry(dep.from.as_str())
-            .or_default()
-            .insert(dep.to.as_str());
-    }
-
-    if fan_out.is_empty() {
+pub fn check(
+    graph: &ArchitectureGraph,
+    dep_map: &BTreeMap<ModuleId, BTreeSet<ModuleId>>,
+) -> Vec<GraphViolation> {
+    if dep_map.is_empty() {
         return vec![];
     }
 
-    let counts: Vec<usize> = fan_out.values().map(HashSet::len).collect();
+    let counts: Vec<usize> = dep_map.values().map(BTreeSet::len).collect();
     let threshold = derived_threshold(&counts).max(MIN_GOD_THRESHOLD);
 
-    fan_out
-        .into_iter()
-        .filter(|(_, imports)| imports.len() >= threshold)
-        .map(|(module, imports)| {
-            let fan_out = imports.len();
+    dep_map
+        .iter()
+        .filter(|(_, targets)| targets.len() >= threshold)
+        .map(|(&mid, targets)| {
+            let module = graph.modules[&mid].name().0.clone();
+            let fan_out = targets.len();
             GraphViolation {
                 rule: GraphRuleId::GodModule,
                 severity: GraphSeverity::Warning,
                 message: format!("{module}  (fan-out: {fan_out}, threshold: {threshold})"),
                 kind: ViolationKind::GodModule {
-                    module: module.to_string(),
+                    module,
                     fan_out,
                     threshold,
                 },
@@ -66,26 +62,19 @@ fn derived_threshold(counts: &[usize]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn make_deps(pairs: &[(&str, &str)]) -> Vec<ModuleDep> {
-        pairs
-            .iter()
-            .map(|(f, t)| ModuleDep {
-                from: (*f).into(),
-                to: (*t).into(),
-            })
-            .collect()
-    }
+    use crate::graph::rules::make_graph;
 
     #[test]
     fn test_god_module_empty_module_deps_should_produce_no_violations() {
-        let actual = check(&make_deps(&[]));
+        let graph = make_graph(&[]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual, vec![]);
     }
 
     #[test]
     fn test_god_module_above_threshold_should_produce_violation() {
-        let mut deps: Vec<(&str, &str)> = vec![
+        let mut pairs: Vec<(&str, &str)> = vec![
             ("m1", "x1"),
             ("m2", "x2"),
             ("m3", "x3"),
@@ -93,22 +82,50 @@ mod tests {
             ("m5", "x5"),
         ];
         for tgt in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"] {
-            deps.push(("god", tgt));
+            pairs.push(("god", tgt));
         }
-        let actual = check(&make_deps(&deps));
+        let graph = make_graph(&pairs);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual.len(), 1);
         assert_eq!(actual[0].rule, GraphRuleId::GodModule);
     }
 
     #[test]
     fn test_god_module_duplicate_edges_should_count_unique_imports_only() {
-        let actual = check(&make_deps(&[("god", "a"), ("god", "a"), ("god", "a")]));
+        let graph = make_graph(&[("god", "a"), ("god", "a"), ("god", "a")]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual, vec![]);
     }
 
     #[test]
     fn test_god_module_below_threshold_should_produce_no_violation() {
-        let actual = check(&make_deps(&[("god", "a")]));
+        let graph = make_graph(&[("god", "a")]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
+        assert_eq!(actual, vec![]);
+    }
+
+    #[test]
+    fn test_same_module_self_edge_should_not_count_toward_fan_out() {
+        let graph = make_graph(&[("a", "a"), ("a", "b")]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
+        assert_eq!(actual, vec![]);
+    }
+
+    #[test]
+    fn test_multiple_edges_to_same_target_module_should_count_as_one() {
+        let graph = make_graph(&[("a", "b"), ("a", "b")]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let fan_out = dep_map[dep_map
+            .keys()
+            .find(|&&mid| graph.modules[&mid].name().0 == "a")
+            .unwrap()]
+        .len();
+        assert_eq!(fan_out, 1);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual, vec![]);
     }
 }

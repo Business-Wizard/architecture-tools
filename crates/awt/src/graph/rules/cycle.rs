@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use lang_core::ModuleDep;
+use architecture_core::model::{ArchitectureGraph, ModuleId};
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::DiGraph;
 
@@ -9,25 +9,31 @@ use crate::graph::violations::{GraphRuleId, GraphSeverity, GraphViolation, Viola
 const MIN_CYCLE_SIZE: usize = 2;
 
 #[must_use]
-pub fn check(deps: &[ModuleDep]) -> Vec<GraphViolation> {
-    let mut index_map: HashMap<&str, petgraph::graph::NodeIndex> = HashMap::new();
-    let mut graph: DiGraph<&str, ()> = DiGraph::new();
+pub fn check(
+    graph: &ArchitectureGraph,
+    dep_map: &BTreeMap<ModuleId, BTreeSet<ModuleId>>,
+) -> Vec<GraphViolation> {
+    let mut index_map: HashMap<ModuleId, petgraph::graph::NodeIndex> = HashMap::new();
+    let mut pg: DiGraph<ModuleId, ()> = DiGraph::new();
 
-    for dep in deps {
-        let from = *index_map
-            .entry(dep.from.as_str())
-            .or_insert_with(|| graph.add_node(dep.from.as_str()));
-        let to = *index_map
-            .entry(dep.to.as_str())
-            .or_insert_with(|| graph.add_node(dep.to.as_str()));
-        graph.add_edge(from, to, ());
+    for (&mid, targets) in dep_map {
+        let from = *index_map.entry(mid).or_insert_with(|| pg.add_node(mid));
+        for &target in targets {
+            let to = *index_map
+                .entry(target)
+                .or_insert_with(|| pg.add_node(target));
+            pg.add_edge(from, to, ());
+        }
     }
 
-    tarjan_scc(&graph)
+    tarjan_scc(&pg)
         .into_iter()
         .filter(|scc| scc.len() >= MIN_CYCLE_SIZE)
         .map(|scc| {
-            let mut modules: Vec<String> = scc.iter().map(|&idx| graph[idx].to_string()).collect();
+            let mut modules: Vec<String> = scc
+                .iter()
+                .map(|&idx| graph.modules[&pg[idx]].name().0.clone())
+                .collect();
             modules.sort();
             let message = format!("cycle: {}", modules.join(" → "));
             GraphViolation {
@@ -43,20 +49,13 @@ pub fn check(deps: &[ModuleDep]) -> Vec<GraphViolation> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn make_deps(pairs: &[(&str, &str)]) -> Vec<ModuleDep> {
-        pairs
-            .iter()
-            .map(|(f, t)| ModuleDep {
-                from: (*f).into(),
-                to: (*t).into(),
-            })
-            .collect()
-    }
+    use crate::graph::rules::make_graph;
 
     #[test]
     fn test_two_modules_with_mutual_dep_should_report_cycle() {
-        let actual = check(&make_deps(&[("a", "b"), ("b", "a")]));
+        let graph = make_graph(&[("a", "b"), ("b", "a")]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual.len(), 1);
         assert_eq!(actual[0].rule, GraphRuleId::CyclicDependency);
         assert_eq!(actual[0].severity, GraphSeverity::Error);
@@ -64,7 +63,9 @@ mod tests {
 
     #[test]
     fn test_three_module_cycle_should_report_one_violation() {
-        let actual = check(&make_deps(&[("a", "b"), ("b", "c"), ("c", "a")]));
+        let graph = make_graph(&[("a", "b"), ("b", "c"), ("c", "a")]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual.len(), 1);
         let ViolationKind::CyclicDependency { modules } = &actual[0].kind else {
             panic!("wrong kind");
@@ -74,30 +75,33 @@ mod tests {
 
     #[test]
     fn test_dag_with_no_cycles_should_produce_no_violations() {
-        let actual = check(&make_deps(&[("a", "b"), ("b", "c")]));
+        let graph = make_graph(&[("a", "b"), ("b", "c")]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual, vec![]);
     }
 
     #[test]
     fn test_self_loop_should_not_produce_violation() {
-        let actual = check(&make_deps(&[("a", "a")]));
+        let graph = make_graph(&[("a", "a")]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual, vec![]);
     }
 
     #[test]
     fn test_two_disjoint_cycles_should_produce_two_violations() {
-        let actual = check(&make_deps(&[
-            ("a", "b"),
-            ("b", "a"),
-            ("c", "d"),
-            ("d", "c"),
-        ]));
+        let graph = make_graph(&[("a", "b"), ("b", "a"), ("c", "d"), ("d", "c")]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual.len(), 2);
     }
 
     #[test]
     fn test_empty_module_deps_should_produce_no_violations() {
-        let actual = check(&make_deps(&[]));
+        let graph = make_graph(&[]);
+        let dep_map = super::super::module_dep_map(&graph);
+        let actual = check(&graph, &dep_map);
         assert_eq!(actual, vec![]);
     }
 }

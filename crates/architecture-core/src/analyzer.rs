@@ -498,6 +498,7 @@ mod tests {
             modules: modules.into_iter().map(|m| (m.id(), m)).collect(),
             objects: objects.into_iter().map(|o| (o.id, o)).collect(),
             dependencies,
+            module_edges: vec![],
         }
     }
 

@@ -5,10 +5,10 @@ pub mod object_graph;
 mod rules;
 pub mod violations;
 
-use lang_core::ModuleDep;
+use architecture_core::model::ArchitectureGraph;
 use violations::GraphViolation;
 
 #[must_use]
-pub fn analyze(deps: &[ModuleDep]) -> Vec<GraphViolation> {
-    rules::run_all(deps)
+pub fn analyze(graph: &ArchitectureGraph) -> Vec<GraphViolation> {
+    rules::run_all(graph)
 }

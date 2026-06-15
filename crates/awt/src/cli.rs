@@ -2,7 +2,10 @@ use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use ignore::WalkBuilder;
 
-use crate::graph::{coupling_graph::GraphIndex, metrics, object_graph::ObjectGraphIndex};
+use crate::graph::{
+    architecture_graph_builder::ArchitectureGraphBuilder, coupling_graph::GraphIndex, metrics,
+    object_graph::ObjectGraphIndex,
+};
 use crate::report::{dot, objects_dot, sdp_flow, terminal};
 
 #[derive(Parser)]
@@ -100,15 +103,31 @@ fn run_inspect_command(args: &InspectArgs) {
 
     match analyzer.module_deps(args.path.as_std_path()) {
         Ok(module_deps) => {
+            let source_files = collect_source_files(&args.path, namer.file_extension());
+
+            let class_defs = match object_analyzer.object_defs(args.path.as_std_path()) {
+                Ok(defs) => defs,
+                Err(e) => {
+                    eprintln!("warning: could not extract object definitions: {e}");
+                    vec![]
+                }
+            };
+
+            let arch_graph = ArchitectureGraphBuilder::build(
+                &module_deps,
+                &class_defs,
+                &source_files,
+                namer.as_ref(),
+            );
+
             let violations = if args.violations {
-                let v = crate::graph::analyze(&module_deps);
+                let v = crate::graph::analyze(&arch_graph);
                 terminal::print_graph_violations_section(&v, &args.path);
                 v
             } else {
                 vec![]
             };
 
-            let source_files = collect_source_files(&args.path, namer.file_extension());
             let graph_idx =
                 GraphIndex::build_from_module_deps(&module_deps, &source_files, namer.as_ref());
             let metrics_result = metrics::compute(&graph_idx);
@@ -122,25 +141,21 @@ fn run_inspect_command(args: &InspectArgs) {
                 eprintln!("warning: could not write SDP flow chart: {e}");
             }
 
-            match object_analyzer.object_defs(args.path.as_std_path()) {
-                Ok(class_defs) if !class_defs.is_empty() => {
-                    let obj_idx = ObjectGraphIndex::build_from_class_defs(&class_defs);
-                    let cycle_modules = dot::cycle_module_names(&graph_idx);
-                    if let Err(e) = objects_dot::write_objects_dot(
-                        &obj_idx,
-                        &cycle_modules,
-                        args.objects_out.as_path(),
-                    ) {
-                        eprintln!("warning: could not write objects dot output: {e}");
-                    }
+            if class_defs.is_empty() {
+                eprintln!(
+                    "warning: no class definitions found in {}, objects.dot will not be written",
+                    args.path
+                );
+            } else {
+                let obj_idx = ObjectGraphIndex::build_from_class_defs(&class_defs);
+                let cycle_modules = dot::cycle_module_names(&graph_idx);
+                if let Err(e) = objects_dot::write_objects_dot(
+                    &obj_idx,
+                    &cycle_modules,
+                    args.objects_out.as_path(),
+                ) {
+                    eprintln!("warning: could not write objects dot output: {e}");
                 }
-                Ok(_) => {
-                    eprintln!(
-                        "warning: no class definitions found in {}, objects.dot will not be written",
-                        args.path
-                    );
-                }
-                Err(e) => eprintln!("warning: could not extract object definitions: {e}"),
             }
 
             if args.fail_on_violations && !violations.is_empty() {

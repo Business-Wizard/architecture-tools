@@ -251,12 +251,20 @@ pub struct DependencyEdge {
     pub occurrence_count: usize,
 }
 
+/// A module-level import edge (derived from use/import statements).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleEdge {
+    pub from: ModuleId,
+    pub to: ModuleId,
+}
+
 /// The complete architecture graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchitectureGraph {
     pub modules: BTreeMap<ModuleId, Module>,
     pub objects: BTreeMap<ObjectId, CodeObject>,
     pub dependencies: Vec<DependencyEdge>,
+    pub module_edges: Vec<ModuleEdge>,
 }
 
 impl Error for ObjectId {}

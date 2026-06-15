@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use architecture_core::model::{
     ArchitectureGraph, CodeObject, DependencyEdge, DependencyKind, ExternalAbstractionHint, Module,
-    ModuleId, ObjectId, ObjectKind, Operation, OperationAbstraction, OperationKind, QualifiedName,
-    TraitLikeKind, TypeKind, TypeRef,
+    ModuleEdge, ModuleId, ObjectId, ObjectKind, Operation, OperationAbstraction, OperationKind,
+    QualifiedName, TraitLikeKind, TypeKind, TypeRef,
 };
 use camino::Utf8PathBuf;
 use lang_core::{ClassDef, ModuleDep};
@@ -32,12 +32,14 @@ impl ArchitectureGraphBuilder {
         let (objects, qname_to_object_id, mut module_object_ids) =
             build_objects(class_defs, &module_name_to_id);
         let dependencies = build_dependencies(class_defs, &qname_to_object_id);
+        let module_edges = build_module_edges(deps, &module_name_to_id);
         let modules = assemble_modules(&file_to_module_id, &mut module_object_ids);
 
         ArchitectureGraph {
             modules,
             objects,
             dependencies,
+            module_edges,
         }
     }
 }
@@ -172,6 +174,19 @@ fn build_dependencies(
     dependencies
 }
 
+fn build_module_edges(
+    deps: &[ModuleDep],
+    module_name_to_id: &HashMap<String, ModuleId>,
+) -> Vec<ModuleEdge> {
+    deps.iter()
+        .filter_map(|dep| {
+            let from = *module_name_to_id.get(dep.from.as_str())?;
+            let to = *module_name_to_id.get(dep.to.as_str())?;
+            Some(ModuleEdge { from, to })
+        })
+        .collect()
+}
+
 fn assemble_modules(
     file_to_module_id: &HashMap<Utf8PathBuf, ModuleId>,
     module_object_ids: &mut HashMap<ModuleId, BTreeSet<ObjectId>>,
@@ -289,6 +304,7 @@ mod tests {
             modules: BTreeMap::new(),
             objects: BTreeMap::new(),
             dependencies: vec![],
+            module_edges: vec![],
         };
         assert_eq!(actual, expected);
     }
