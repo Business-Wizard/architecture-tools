@@ -35,7 +35,41 @@ impl lang_core::ModuleNamer for PythonAnalyzer {
     }
 
     fn path_to_module_name(&self, rel_path: &Path) -> lang_core::ModuleName {
-        let dotted = python_imports::path_to_module_name(rel_path);
-        lang_core::ModuleName::new(dotted)
+        let s = rel_path.to_string_lossy();
+        let without_ext = s.trim_end_matches(".py");
+        let dotted = without_ext.replace(['/', '\\'], ".");
+        let name = dotted
+            .strip_suffix(".__init__")
+            .unwrap_or(&dotted)
+            .to_string();
+        lang_core::ModuleName::new(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lang_core::ModuleNamer as _;
+
+    #[test]
+    fn test_path_to_module_name_init_file_should_resolve_to_package_name() {
+        let root = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/myapp/domain/__init__.py");
+        let rel = file.strip_prefix(root).unwrap_or(file);
+        assert_eq!(
+            PythonAnalyzer.path_to_module_name(rel).as_str(),
+            "myapp.domain"
+        );
+    }
+
+    #[test]
+    fn test_path_to_module_name_regular_file_should_resolve_to_dotted_path() {
+        let root = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/myapp/domain/order.py");
+        let rel = file.strip_prefix(root).unwrap_or(file);
+        assert_eq!(
+            PythonAnalyzer.path_to_module_name(rel).as_str(),
+            "myapp.domain.order"
+        );
     }
 }

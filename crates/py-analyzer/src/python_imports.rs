@@ -19,7 +19,13 @@ pub fn extract(package_path: &Path) -> Result<(Vec<ModuleDep>, Vec<ClassDef>), I
     for file in &py_files {
         let source = std::fs::read(file).map_err(InspectorError::Io)?;
         let rel = file.strip_prefix(package_path).unwrap_or(file);
-        let module_name = path_to_module_name(rel);
+        let rel_str = rel.to_string_lossy();
+        let without_ext = rel_str.trim_end_matches(".py");
+        let dotted = without_ext.replace(['/', '\\'], ".");
+        let module_name = dotted
+            .strip_suffix(".__init__")
+            .unwrap_or(&dotted)
+            .to_string();
 
         let Some(parsed) = ParsedFile::parse(&source) else {
             continue;
@@ -59,23 +65,6 @@ fn collect_python_files(root: &Path) -> Result<Vec<std::path::PathBuf>, Inspecto
         }
     }
     Ok(files)
-}
-
-// ---------------------------------------------------------------------------
-// Path → dotted module name
-// Mirrors architecture_builder::path_to_qualified_name in the awt crate.
-// ---------------------------------------------------------------------------
-
-pub(crate) fn path_to_module_name(rel_path: &Path) -> String {
-    let without_ext = rel_path
-        .to_string_lossy()
-        .trim_end_matches(".py")
-        .to_string();
-    let dotted = without_ext.replace(['/', '\\'], ".");
-    dotted
-        .strip_suffix(".__init__")
-        .unwrap_or(&dotted)
-        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -465,22 +454,6 @@ mod tests {
 
     fn parse(src: &str) -> ParsedFile {
         ParsedFile::parse(src.as_bytes()).expect("parse failed")
-    }
-
-    #[test]
-    fn test_path_to_module_name_init_file_should_resolve_to_package_name() {
-        let root = std::path::Path::new("/repo");
-        let file = std::path::Path::new("/repo/myapp/domain/__init__.py");
-        let rel = file.strip_prefix(root).unwrap_or(file);
-        assert_eq!(path_to_module_name(rel), "myapp.domain");
-    }
-
-    #[test]
-    fn test_path_to_module_name_regular_file_should_resolve_to_dotted_path() {
-        let root = std::path::Path::new("/repo");
-        let file = std::path::Path::new("/repo/myapp/domain/order.py");
-        let rel = file.strip_prefix(root).unwrap_or(file);
-        assert_eq!(path_to_module_name(rel), "myapp.domain.order");
     }
 
     #[test]
