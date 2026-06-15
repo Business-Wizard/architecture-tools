@@ -31,10 +31,10 @@ pub fn validate_graph(graph: &ArchitectureGraph) -> Result<()> {
     }
 
     for module in graph.modules.values() {
-        for &obj_id in &module.object_ids {
+        for &obj_id in module.object_ids() {
             if !graph.objects.contains_key(&obj_id) {
                 return Err(ArchitectureError::ModuleReferencesUnknownObject {
-                    module_id: module.id,
+                    module_id: module.id(),
                     object_id: obj_id,
                 });
             }
@@ -42,13 +42,14 @@ pub fn validate_graph(graph: &ArchitectureGraph) -> Result<()> {
     }
 
     for module in graph.modules.values() {
-        for &obj_id in &module.object_ids {
+        for &obj_id in module.object_ids() {
             let obj = &graph.objects[&obj_id];
-            if obj.module_id != module.id {
+            if obj.module_id != module.id() {
                 return Err(ArchitectureError::InvalidModelInvariant {
                     message: format!(
                         "object {obj_id} has module_id {} but is in module {}",
-                        obj.module_id, module.id
+                        obj.module_id,
+                        module.id()
                     ),
                 });
             }
@@ -175,7 +176,7 @@ impl InstabilityStrategy for DependencyGraphInstability {
         policy: &AnalysisPolicy,
     ) -> Result<InstabilityMetric> {
         let module = &graph.modules[&module_id];
-        let module_objects: HashSet<ObjectId> = module.object_ids.iter().copied().collect();
+        let module_objects: HashSet<ObjectId> = module.object_ids().iter().copied().collect();
 
         let mut out_targets: BTreeSet<ObjectId> = BTreeSet::new();
         let mut out_edges: Vec<&DependencyEdge> = Vec::new();
@@ -428,9 +429,9 @@ impl AbstractnessStrategy for CompositionalAbstractness {
         let module = &graph.modules[&module_id];
         let mut sum: f64 = 0.0;
         #[allow(clippy::cast_precision_loss)]
-        let total_weight = module.object_ids.len() as f64;
+        let total_weight = module.object_ids().len() as f64;
 
-        for &obj_id in &module.object_ids {
+        for &obj_id in module.object_ids() {
             sum += self.compute_object(obj_id, graph, policy)?;
         }
 
@@ -470,8 +471,16 @@ mod tests {
         }
     }
 
-    fn make_module(id: ModuleId, name: &str, object_ids: Vec<ObjectId>) -> Module {
-        Module {
+    fn make_source_module(id: ModuleId, name: &str, object_ids: Vec<ObjectId>) -> Module {
+        Module::Source {
+            id,
+            name: QualifiedName(name.to_string()),
+            object_ids: object_ids.into_iter().collect(),
+        }
+    }
+
+    fn make_test_module(id: ModuleId, name: &str, object_ids: Vec<ObjectId>) -> Module {
+        Module::Test {
             id,
             name: QualifiedName(name.to_string()),
             object_ids: object_ids.into_iter().collect(),
@@ -484,7 +493,7 @@ mod tests {
         dependencies: Vec<DependencyEdge>,
     ) -> ArchitectureGraph {
         ArchitectureGraph {
-            modules: modules.into_iter().map(|m| (m.id, m)).collect(),
+            modules: modules.into_iter().map(|m| (m.id(), m)).collect(),
             objects: objects.into_iter().map(|o| (o.id, o)).collect(),
             dependencies,
         }
@@ -527,7 +536,7 @@ mod tests {
         let oid_a = ObjectId(1);
         let oid_b = ObjectId(2);
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid_a, oid_b])],
+            vec![make_source_module(mid, "m", vec![oid_a, oid_b])],
             vec![
                 make_object(oid_a, mid, "A", ObjectKind::Constant),
                 make_object(oid_b, mid, "B", ObjectKind::Constant),
@@ -563,7 +572,7 @@ mod tests {
         let oid_a = ObjectId(1);
         let oid_b = ObjectId(2);
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid_a, oid_b])],
+            vec![make_source_module(mid, "m", vec![oid_a, oid_b])],
             vec![
                 make_object(oid_a, mid, "A", ObjectKind::Constant),
                 make_object(oid_b, mid, "B", ObjectKind::Constant),
@@ -591,7 +600,7 @@ mod tests {
         let oid_a = ObjectId(1);
         let oid_b = ObjectId(2);
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid_a, oid_b])],
+            vec![make_source_module(mid, "m", vec![oid_a, oid_b])],
             vec![
                 make_object(oid_a, mid, "A", ObjectKind::Constant),
                 make_object(oid_b, mid, "B", ObjectKind::Constant),
@@ -617,8 +626,8 @@ mod tests {
         let oid_b = ObjectId(2);
         let graph = make_graph(
             vec![
-                make_module(mid1, "m1", vec![oid_a]),
-                make_module(mid2, "m2", vec![oid_b]),
+                make_source_module(mid1, "m1", vec![oid_a]),
+                make_source_module(mid2, "m2", vec![oid_b]),
             ],
             vec![
                 make_object(oid_a, mid1, "A", ObjectKind::Constant),
@@ -683,7 +692,7 @@ mod tests {
             },
         ];
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid_a, oid_b])],
+            vec![make_source_module(mid, "m", vec![oid_a, oid_b])],
             vec![
                 make_object(
                     oid_a,
@@ -718,7 +727,7 @@ mod tests {
             }],
         }];
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid_a])],
+            vec![make_source_module(mid, "m", vec![oid_a])],
             vec![obj_a],
             Vec::new(),
         );
@@ -742,7 +751,7 @@ mod tests {
             }],
         }];
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid_a])],
+            vec![make_source_module(mid, "m", vec![oid_a])],
             vec![obj_a],
             Vec::new(),
         );
@@ -767,7 +776,7 @@ mod tests {
             }],
         }];
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid_a])],
+            vec![make_source_module(mid, "m", vec![oid_a])],
             vec![obj_a],
             Vec::new(),
         );
@@ -798,7 +807,7 @@ mod tests {
             }],
         }];
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid_a, oid_b])],
+            vec![make_source_module(mid, "m", vec![oid_a, oid_b])],
             vec![obj_a, obj_b],
             Vec::new(),
         );
@@ -833,7 +842,7 @@ mod tests {
             }],
         }];
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid_a, oid_b])],
+            vec![make_source_module(mid, "m", vec![oid_a, oid_b])],
             vec![obj_a, obj_b],
             Vec::new(),
         );
@@ -854,7 +863,7 @@ mod tests {
         let mid2 = ModuleId(2);
         let oid = ObjectId(1);
         let graph = make_graph(
-            vec![make_module(mid1, "m1", vec![])],
+            vec![make_source_module(mid1, "m1", vec![])],
             vec![make_object(oid, mid2, "A", ObjectKind::Constant)],
             Vec::new(),
         );
@@ -865,7 +874,11 @@ mod tests {
     fn test_validate_graph_unknown_object_in_module_should_fail() {
         let mid = ModuleId(1);
         let oid = ObjectId(1);
-        let graph = make_graph(vec![make_module(mid, "m", vec![oid])], vec![], Vec::new());
+        let graph = make_graph(
+            vec![make_source_module(mid, "m", vec![oid])],
+            vec![],
+            Vec::new(),
+        );
         assert!(validate_graph(&graph).is_err());
     }
 
@@ -875,7 +888,7 @@ mod tests {
         let oid = ObjectId(1);
         let oid_unknown = ObjectId(999);
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid])],
+            vec![make_source_module(mid, "m", vec![oid])],
             vec![make_object(oid, mid, "A", ObjectKind::Constant)],
             vec![DependencyEdge {
                 source: oid_unknown,
@@ -895,7 +908,7 @@ mod tests {
         let oid = ObjectId(1);
         let oid_unknown = ObjectId(999);
         let graph = make_graph(
-            vec![make_module(mid, "m", vec![oid])],
+            vec![make_source_module(mid, "m", vec![oid])],
             vec![make_object(oid, mid, "A", ObjectKind::Constant)],
             vec![DependencyEdge {
                 source: oid,
@@ -905,5 +918,17 @@ mod tests {
             }],
         );
         assert!(validate_graph(&graph).is_err());
+    }
+
+    #[test]
+    fn test_module_is_test_source_variant_should_return_false() {
+        let m = make_source_module(ModuleId(1), "src", vec![]);
+        assert!(!m.is_test());
+    }
+
+    #[test]
+    fn test_module_is_test_test_variant_should_return_true() {
+        let m = make_test_module(ModuleId(1), "tests", vec![]);
+        assert!(m.is_test());
     }
 }

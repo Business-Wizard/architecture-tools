@@ -34,20 +34,20 @@ pub fn print_architecture_report(graph: &ArchitectureGraph) {
         .values()
         .filter_map(|module| {
             let i = instability
-                .module_instability(graph, module.id, &policy)
+                .module_instability(graph, module.id(), &policy)
                 .ok()?
                 .ratio
                 .score
                 .map_or(0.0, |s| s.value);
             let a = abstractness
-                .module_abstractness(graph, module.id, &policy)
+                .module_abstractness(graph, module.id(), &policy)
                 .ok()?
                 .ratio
                 .score
                 .map_or(0.0, |s| s.value);
             let dist = (a + i - 1.0_f64).abs();
-            let objects = module.object_ids.len();
-            Some((module.name.0.clone(), objects, i, a, dist))
+            let objects = module.object_ids().len();
+            Some((module.name().0.clone(), objects, i, a, dist))
         })
         .collect();
 

@@ -179,10 +179,45 @@ pub struct Operation {
 
 /// A module in the architecture.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Module {
-    pub id: ModuleId,
-    pub name: QualifiedName,
-    pub object_ids: BTreeSet<ObjectId>,
+pub enum Module {
+    Source {
+        id: ModuleId,
+        name: QualifiedName,
+        object_ids: BTreeSet<ObjectId>,
+    },
+    Test {
+        id: ModuleId,
+        name: QualifiedName,
+        object_ids: BTreeSet<ObjectId>,
+    },
+}
+
+impl Module {
+    #[must_use]
+    pub fn id(&self) -> ModuleId {
+        match self {
+            Module::Source { id, .. } | Module::Test { id, .. } => *id,
+        }
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &QualifiedName {
+        match self {
+            Module::Source { name, .. } | Module::Test { name, .. } => name,
+        }
+    }
+
+    #[must_use]
+    pub fn object_ids(&self) -> &BTreeSet<ObjectId> {
+        match self {
+            Module::Source { object_ids, .. } | Module::Test { object_ids, .. } => object_ids,
+        }
+    }
+
+    #[must_use]
+    pub fn is_test(&self) -> bool {
+        matches!(self, Module::Test { .. })
+    }
 }
 
 /// A code object (type, function, constant, etc).
