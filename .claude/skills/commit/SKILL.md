@@ -39,7 +39,7 @@ Inspect the current working copy changes, generate a conventional commit message
 - `drop` — **ONLY** for a deliberately temporary commit to expose a bug in CI/production, intended for immediate reversion. NEVER use `drop` for removing code, removing a dependency, deleting a feature, or any permanent deletion.
 
 **Scopes for this project:**
-`awt`, `mutations`, `runner`, `graph`, `report`, `cli`, `config`
+`awt`, `graph`, `report`, `cli`, `config`
 
 **Subject line rules:**
 - Imperative mood: "add" not "added" or "adds"
@@ -64,6 +64,6 @@ feat(cli): add --dry-run flag to awt run
 fix(runner): handle missing verifier binary gracefully
 refactor(graph): simplify SCC clustering to use petgraph built-ins
 chore(deps): update petgraph to 0.8
-test(mutations): cover add_parameter skip constraints
+test(graph): cover instability computation for isolated nodes
 build(cargo): enable thin-LTO in release profile
 ```

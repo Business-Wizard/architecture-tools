@@ -54,7 +54,7 @@ impl StabilityAxis {
 
 /// A directed dependency edge for the SDP chart. Depender depends on Dependency.
 /// Constructed from coupling-graph edges via `from_coupling_edge` — the only site
-/// where graph direction (src=mutation source) is translated to dependency direction.
+/// where graph direction (src=dependency source) is translated to display direction.
 struct SdpEdge {
     depender: Depender,
     dependency: Dependency,
@@ -342,34 +342,36 @@ mod tests {
     }
 
     fn source_source_graph(src: &str, dst: &str) -> GraphIndex {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        let src_name = std::path::Path::new(src).file_name().unwrap();
-        let dst_name = std::path::Path::new(dst).file_name().unwrap();
-        let import_stem = dst_name
+        let src_stem = std::path::Path::new(src)
+            .file_stem()
+            .unwrap()
             .to_str()
             .unwrap()
-            .strip_suffix(".py")
-            .unwrap_or(dst_name.to_str().unwrap());
-        std::fs::write(root.join(src_name), format!("import {import_stem}\n")).unwrap();
-        std::fs::write(root.join(dst_name), b"").unwrap();
-        let files = vec![
-            Utf8PathBuf::from(src_name.to_str().unwrap()),
-            Utf8PathBuf::from(dst_name.to_str().unwrap()),
-        ];
-        GraphIndex::build_from_source_imports(&files, root, &py_analyzer::PythonAnalyzer)
+            .to_owned();
+        let dst_stem = std::path::Path::new(dst)
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let files = vec![Utf8PathBuf::from(src), Utf8PathBuf::from(dst)];
+        let deps = vec![lang_core::ModuleDep {
+            from: src_stem.into(),
+            to: dst_stem.into(),
+        }];
+        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
     fn source_test_graph() -> GraphIndex {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("domain.py"), b"").unwrap();
-        std::fs::write(root.join("test_domain.py"), b"import domain\n").unwrap();
         let files = vec![
             Utf8PathBuf::from("domain.py"),
             Utf8PathBuf::from("test_domain.py"),
         ];
-        GraphIndex::build_from_source_imports(&files, root, &py_analyzer::PythonAnalyzer)
+        let deps = vec![lang_core::ModuleDep {
+            from: "test_domain".into(),
+            to: "domain".into(),
+        }];
+        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
     fn make_large_graph(n: usize) -> (GraphIndex, MetricsResult) {
@@ -464,9 +466,7 @@ mod tests {
     fn test_write_sdp_flow_with_no_edges_should_produce_valid_empty_chart() {
         let tmp = NamedTempFile::with_suffix(".png").unwrap();
         let path = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let idx =
-            GraphIndex::build_from_source_imports(&[], dir.path(), &py_analyzer::PythonAnalyzer);
+        let idx = GraphIndex::build_from_module_deps(&[], &[], &py_analyzer::PythonAnalyzer);
         let m = stub_metrics(&idx);
         let result = write_sdp_flow(&idx, &m, path.as_path());
         assert!(result.is_ok());

@@ -95,7 +95,7 @@ nix develop
 
 ## Architecture Wind Tunnel (AWT) Tool
 
-**Architecture Wind Tunnel** (`awt`) is a mutation-based coupling analysis tool for Python codebases. It mutates Python code (add/rename/remove parameters, remove imports/modules), runs verifiers in ephemeral temp directories, and aggregates what breaks into coupling clusters — revealing unexpected dependencies and refactor candidates.
+**Architecture Wind Tunnel** (`awt`) is a static architecture analysis tool for Python and Rust codebases. It scans source files, builds a coupling graph from import relationships, computes stability metrics, and reports architectural violations — without running tests or modifying code.
 
 ### Building AWT
 
@@ -114,45 +114,24 @@ cargo run -p awt --
 Once built, the `awt` binary is available as:
 
 ```bash
-# Run mutation analysis on a Python project
-./target/debug/awt run --repo <PATH_TO_PYTHON_PROJECT> [OPTIONS]
+# Inspect a Python or Rust project
+./target/debug/awt inspect <PATH_TO_PROJECT> [OPTIONS]
 
 # Or via cargo
-cargo run -p awt -- run --repo <PATH_TO_PYTHON_PROJECT> [OPTIONS]
+cargo run -p awt -- inspect <PATH_TO_PROJECT> [OPTIONS]
 
 # Show all available options
-./target/debug/awt run --help
+./target/debug/awt inspect --help
 ```
 
 **Key Options:**
-- `--repo <PATH>` — Path to Python repository (required)
-- `--max-mutants <N>` — Limit mutations to run (default: 500 from config, or 500 if not configured)
-- `--jobs <N>` — Parallel jobs (default: CPU count)
-- `--json-out <PATH>` — Write JSON results to file
-- `--dry-run` — Discover candidates without running mutations
-
-### Configuration
-
-Create an `awt.toml` in your Python project root to configure the tool:
-
-```toml
-# Mutation operators to enable
-[operators]
-add_required_parameter = true
-rename_parameter = false
-remove_parameter = false
-remove_import = false
-remove_module = false
-
-# Optional: maximum mutations to test (default: 500)
-max_mutations = 100
-```
-
-The tool runs two verifiers by default:
-- **basedpyright**: Type checking (requires Python 3.11+ stubs)
-- **pytest**: Actual test execution (requires passing tests)
-
-The baseline (original code) must pass all verifiers before mutations run.
+- `<PATH>` — Path to the project to inspect (required)
+- `--language <python|rust>` — Language of the codebase (default: python)
+- `--violations` — Analyse structural coupling problems (cycles, hubs, god modules)
+- `--fail-on-violations` — Exit with code 2 if any graph violations are found
+- `--dot-out <PATH>` — Write coupling graph to a .dot file (default: coupling.dot)
+- `--sdp-out <PATH>` — Write SDP dependency-flow chart to a PNG file (default: sdp_flow.png)
+- `--objects-out <PATH>` — Write object-level class graph to a .dot file (default: objects.dot)
 
 ### Example Workflow
 
@@ -163,30 +142,24 @@ cd /Users/josephwilson/repos/beach/architecture-tools
 # Build the tool
 cargo build -p awt
 
-# Run on a sample Python project
-./target/debug/awt run ../some-python-project/
+# Inspect a Python project
+./target/debug/awt inspect ../some-python-project/
 
 # The tool will:
-# 1. Load configuration from awt.toml
-# 2. Scan Python files with tree-sitter
-# 3. Generate mutation candidates
-# 4. Run baseline verifiers (basedpyright, pytest)
-# 5. Apply each mutation to a temp directory and test
-# 6. Generate a terminal report showing coupling clusters
+# 1. Scan Python files and parse import relationships
+# 2. Build a coupling graph
+# 3. Compute stability metrics (SDP)
+# 4. Write coupling.dot, sdp_flow.png, objects.dot
 ```
 
 ### Output
 
-The tool produces a terminal report with these sections:
+The tool produces:
 
-#### Baseline
-Tests that the original code passes all verifiers. If baseline fails, mutations are skipped (no point testing broken code).
-
-#### Mutation Summary
-- **Total**: Number of mutations generated
-- **Breaks**: Mutations that caused a verifier to fail (indicates coupling)
-- **Survives**: Mutations that all verifiers still pass (low coupling)
-- **Invalid**: Mutations that couldn't be applied
+- **Terminal report**: Coupling violations, hub files, and instability metrics
+- **coupling.dot**: Full coupling graph (render with graphviz `dot -Tpng`)
+- **sdp_flow.png**: Stable Dependencies Principle flow chart
+- **objects.dot**: Object-level class relationship graph
 
 #### Top Centers of Gravity
 Files with the most coupling. Shows:

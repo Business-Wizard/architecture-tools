@@ -301,12 +301,7 @@ mod tests {
 
     #[test]
     fn test_cycle_edges_should_get_crimson_color() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("a.py"), b"import b\n").unwrap();
-        std::fs::write(root.join("b.py"), b"import a\n").unwrap();
-        let files = vec![Utf8PathBuf::from("a.py"), Utf8PathBuf::from("b.py")];
-        let idx = GraphIndex::build_from_source_imports(&files, root, &py_analyzer::PythonAnalyzer);
+        let idx = fixture_cycle();
         let dot = render(&idx, &stub_metrics(&idx));
         assert!(dot.contains("color=crimson"));
     }

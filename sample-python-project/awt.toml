@@ -1,10 +1,2 @@
 # Architecture Wind Tunnel configuration for sample project
-verifiers = ["basedpyright", "pytest"]
-
-[operators]
-add_required_parameter = true
-rename_parameter = true
-remove_parameter = true
-remove_import = true
-
-max_mutations = 200
+# No configuration required for static analysis — awt inspect works out of the box.

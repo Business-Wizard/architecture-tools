@@ -125,8 +125,8 @@ mod tests {
     }
 
     #[test]
-    fn test_node_broken_by_many_mutations_should_have_instability_one() {
-        // hub→a and hub→b: mutating hub breaks a and b, so a and b depend on hub.
+    fn test_node_with_high_afferent_coupling_should_have_instability_zero() {
+        // hub→a and hub→b: a and b depend on hub.
         // hub has high afferent coupling (many dependents) → I=0 (stable).
         // a and b have no dependents and depend on hub → I=1 (unstable).
         let idx = make_graph_index(&[("src/hub.py", "src/a.py"), ("src/hub.py", "src/b.py")]);
@@ -142,10 +142,10 @@ mod tests {
     }
 
     #[test]
-    fn test_node_whose_mutations_break_many_should_have_instability_zero() {
-        // a→consumer and b→consumer: mutating a or b breaks consumer, so consumer depends on both.
+    fn test_node_with_high_efferent_coupling_should_have_instability_one() {
+        // a→consumer and b→consumer: consumer depends on both a and b.
         // consumer has no outgoing coupling edges → nothing depends on consumer → I=1 (unstable).
-        // a and b each break consumer → consumer depends on them → a and b are stable (I=0).
+        // a and b are depended on by consumer → a and b are stable (I=0).
         let idx = make_graph_index(&[
             ("src/a.py", "src/consumer.py"),
             ("src/b.py", "src/consumer.py"),

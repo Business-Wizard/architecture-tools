@@ -134,49 +134,6 @@ impl GraphIndex {
 
         GraphIndex { graph }
     }
-
-    #[cfg(test)]
-    pub fn build_from_source_imports(
-        source_files: &[Utf8PathBuf],
-        repo_root: &std::path::Path,
-        namer: &dyn lang_core::ModuleNamer,
-    ) -> Self {
-        let module_map = build_module_map(source_files, namer);
-        let mut graph = CouplingGraph::new();
-        let mut node_map: HashMap<Utf8PathBuf, NodeIndex> = HashMap::new();
-
-        for file in source_files {
-            let abs = repo_root.join(file.as_str());
-            let Ok(source) = std::fs::read(&abs) else {
-                continue;
-            };
-            let Some(parsed) = crate::python_ast::ParsedFile::parse(&source) else {
-                continue;
-            };
-
-            for imp in crate::python_ast::find_imports(&parsed) {
-                for module_name in crate::python_ast::extract_module_names(&imp.module_path) {
-                    let Some(target) = module_map.get(&module_name) else {
-                        continue;
-                    };
-                    if target == file {
-                        continue;
-                    }
-                    // Edge: target (dependency) → file (importer/depender)
-                    // Matches build() semantics: src=dependency, dst=depender
-                    let target_idx = get_or_insert_node(&mut graph, &mut node_map, target.clone());
-                    let file_idx = get_or_insert_node(&mut graph, &mut node_map, file.clone());
-                    if let Some(e) = graph.find_edge(target_idx, file_idx) {
-                        graph[e].failure_count += 1;
-                    } else {
-                        graph.add_edge(target_idx, file_idx, CouplingEdge { failure_count: 1 });
-                    }
-                }
-            }
-        }
-
-        GraphIndex { graph }
-    }
 }
 
 #[cfg(test)]
@@ -254,51 +211,6 @@ mod tests {
             Some(&Utf8PathBuf::from("src/domain/__init__.py"))
         );
         assert!(!map.contains_key("__init__"));
-    }
-
-    #[test]
-    fn test_build_from_source_imports_should_add_edge_from_dependency_to_importer() {
-        // order.py imports billing → edge: billing → order (billing is the dependency)
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("order.py"), b"import billing\n").unwrap();
-        std::fs::write(root.join("billing.py"), b"").unwrap();
-
-        let files = vec![
-            Utf8PathBuf::from("order.py"),
-            Utf8PathBuf::from("billing.py"),
-        ];
-        let idx = GraphIndex::build_from_source_imports(&files, root, &python_namer());
-
-        assert_eq!(idx.graph.edge_count(), 1);
-        let edge = idx.graph.edge_indices().next().unwrap();
-        let (src, dst) = idx.graph.edge_endpoints(edge).unwrap();
-        assert_eq!(idx.graph[src].path, Utf8PathBuf::from("billing.py"));
-        assert_eq!(idx.graph[dst].path, Utf8PathBuf::from("order.py"));
-    }
-
-    #[test]
-    fn test_build_from_source_imports_should_not_add_self_edges() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("order.py"), b"import order\n").unwrap();
-
-        let files = vec![Utf8PathBuf::from("order.py")];
-        let idx = GraphIndex::build_from_source_imports(&files, root, &python_namer());
-
-        assert_eq!(idx.graph.edge_count(), 0);
-    }
-
-    #[test]
-    fn test_build_from_source_imports_should_skip_third_party_imports() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        std::fs::write(root.join("order.py"), b"import requests\nimport os\n").unwrap();
-
-        let files = vec![Utf8PathBuf::from("order.py")];
-        let idx = GraphIndex::build_from_source_imports(&files, root, &python_namer());
-
-        assert_eq!(idx.graph.edge_count(), 0);
     }
 
     #[test]

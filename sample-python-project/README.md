@@ -22,112 +22,39 @@ sample-python-project/
 
 - **Customer**: Represents a customer (simple data holder)
 - **Order**: Core domain entity with methods to confirm/cancel
-- **BillingService**: Processes payments (depends on Order, creates coupling)
+- **BillingService**: Processes payments (depends on Order, creating a coupling edge)
 
-The coupling between `billing.py` and `order.py` is intentional—AWT will detect this when you add a required parameter to functions like `Order.get_customer_name()`.
+The coupling between `billing.py` and `order.py` is intentional — AWT will detect it as an import dependency edge and report instability metrics for both modules.
 
 ## Running AWT
 
-### Step 1: Install ruff in the nix shell
+### Step 1: Build AWT
 
 ```bash
-# In the architecture-tools repo's nix shell, install ruff
 cd /Users/josephwilson/repos/beach/architecture-tools
-direnv allow  # if needed
-pip install ruff
+cargo build -p awt
 ```
 
-Or add it to your flake.nix:
-
-```nix
-pkgs.ruff  # Add to buildInputs in devShells.default
-```
-
-### Step 2: Run AWT with dry-run (discovery only)
+### Step 2: Run static analysis
 
 ```bash
-/Users/josephwilson/repos/beach/architecture-tools/target/debug/awt run \
-  --repo /tmp/sample-python-project \
-  --dry-run
+/Users/josephwilson/repos/beach/architecture-tools/target/debug/awt inspect \
+  /path/to/sample-python-project
 ```
 
 This will:
 - Scan all Python files
-- Discover candidate functions for mutation
-- Show counts without running verifiers
-
-### Step 3: Run full mutation analysis
-
-```bash
-/Users/josephwilson/repos/beach/architecture-tools/target/debug/awt run \
-  --repo /tmp/sample-python-project \
-  --max-mutants 20
-```
-
-This will:
-1. Load config from `awt.toml`
-2. Run baseline verifier (ruff) to ensure project is clean
-3. Discover mutation candidates (functions that can be modified)
-4. Apply each mutation to a temp directory and run ruff
-5. Aggregate failures into coupling clusters
-6. Print terminal report showing which modules are tightly coupled
-
-### Step 4: Save JSON output for comparison
-
-```bash
-/Users/josephwilson/repos/beach/architecture-tools/target/debug/awt run \
-  --repo /tmp/sample-python-project \
-  --max-mutants 20 \
-  --json-out results.json
-```
-
-### Step 5: Compare two runs (delta report)
-
-```bash
-/Users/josephwilson/repos/beach/architecture-tools/target/debug/awt run \
-  --repo /tmp/sample-python-project \
-  --max-mutants 20 \
-  --json-out results_new.json \
-  --compare results.json
-```
+- Parse import relationships
+- Build a coupling graph
+- Compute stability metrics (SDP)
+- Write `coupling.dot`, `sdp_flow.png`, and `objects.dot`
 
 ## Expected Behavior
 
-When AWT adds a required parameter to `Order.get_customer_name()`:
+When AWT inspects this project:
 
-- **billing.py** will fail (calls this method without the new parameter) → detected coupling
-- **order.py** will fail (defines the function but doesn't pass the new parameter in internal calls)
-- **test_order.py** will fail (tests call this method)
+- **billing.py** imports from **order.py** → coupling edge detected
+- **order.py** has high afferent coupling (depended on by billing + tests) → low instability (stable)
+- **billing.py** has low afferent coupling → high instability (unstable)
 
-This reveals that:
-1. `BillingService` is tightly coupled to the `Order` interface
-2. The function is called from multiple places, making changes costly
-
-## Troubleshooting
-
-### `ruff: command not found`
-
-Install ruff in your environment:
-```bash
-pip install ruff
-```
-
-Or ensure your nix shell includes it.
-
-### `No such file or directory` errors for basedpyright/pytest
-
-These are optional verifiers. To use them:
-1. Install via pip: `pip install basedpyright pytest`
-2. Or remove from `verifiers` list in `awt.toml`
-
-### Config parse errors
-
-Ensure `awt.toml` uses the correct format:
-```toml
-verifiers = ["ruff"]
-
-[operators]
-add_required_parameter = true
-
-max_mutations = 50
-```
+This confirms the expected dependency direction: unstable modules depend on stable ones.
