@@ -18,21 +18,11 @@ pub fn extract(package_path: &Path) -> Result<(Vec<ModuleDep>, Vec<ClassDef>), I
 
     for file in &py_files {
         let source = std::fs::read(file).map_err(InspectorError::Io)?;
-        let rel = file.strip_prefix(package_path).unwrap_or(file);
-        let rel_str = rel.to_string_lossy();
-        let without_ext = rel_str.trim_end_matches(".py");
-        let dotted = without_ext.replace(['/', '\\'], ".");
-        let module_name = dotted
-            .strip_suffix(".__init__")
-            .unwrap_or(&dotted)
-            .to_string();
-
-        let Some(parsed) = ParsedFile::parse(&source) else {
-            continue;
-        };
-
-        collect_module_deps(&parsed, &module_name, &mut module_deps);
-        collect_raw_classes(&parsed, &module_name, &mut raw_classes);
+        let module_name = module_name_from_path(file, package_path);
+        if let Some(parsed) = parse_source(&source, &module_name) {
+            module_deps.extend(parsed.module_deps);
+            raw_classes.extend(parsed.raw_classes);
+        }
     }
 
     // Build per-class qualified-name lookup: "module.ClassName" → qualified node ID.
@@ -49,6 +39,38 @@ pub fn extract(package_path: &Path) -> Result<(Vec<ModuleDep>, Vec<ClassDef>), I
         .collect();
 
     Ok((module_deps, classes))
+}
+
+// ---------------------------------------------------------------------------
+// Per-file parsing (filesystem-free seam)
+// ---------------------------------------------------------------------------
+
+pub(crate) struct ParsedSource {
+    pub(crate) module_deps: Vec<ModuleDep>,
+    pub(crate) raw_classes: Vec<RawClass>,
+}
+
+pub(crate) fn parse_source(source: &[u8], module_name: &str) -> Option<ParsedSource> {
+    let parsed = ParsedFile::parse(source)?;
+    let mut module_deps = Vec::new();
+    let mut raw_classes = Vec::new();
+    collect_module_deps(&parsed, module_name, &mut module_deps);
+    collect_raw_classes(&parsed, module_name, &mut raw_classes);
+    Some(ParsedSource {
+        module_deps,
+        raw_classes,
+    })
+}
+
+fn module_name_from_path(file: &Path, root: &Path) -> String {
+    let rel = file.strip_prefix(root).unwrap_or(file);
+    let rel_str = rel.to_string_lossy();
+    let without_ext = rel_str.trim_end_matches(".py");
+    let dotted = without_ext.replace(['/', '\\'], ".");
+    dotted
+        .strip_suffix(".__init__")
+        .unwrap_or(&dotted)
+        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +217,7 @@ fn package_anchor(module: &str, levels: usize) -> Option<String> {
 // Class analysis
 // ---------------------------------------------------------------------------
 
-struct RawClass {
+pub(crate) struct RawClass {
     module: String,
     name: String,
     bases: Vec<String>,
@@ -671,6 +693,33 @@ mod tests {
         };
         let def = resolve_class_deps(rc, &all, &qualified);
         assert!(def.class_deps.is_empty());
+    }
+
+    // --- Small tests for parse_source() (no filesystem) ---
+
+    #[test]
+    fn test_parse_source_import_statement_should_emit_module_dep() {
+        let src = b"from myapp.domain import Order\n";
+        let result = parse_source(src, "myapp.views").unwrap();
+        assert_eq!(result.module_deps.len(), 1);
+        assert_eq!(result.module_deps[0].from.as_str(), "myapp.views");
+        assert_eq!(result.module_deps[0].to.as_str(), "myapp.domain");
+    }
+
+    #[test]
+    fn test_parse_source_class_definition_should_emit_raw_class() {
+        let src = b"class Customer:\n    pass\n";
+        let result = parse_source(src, "myapp.domain").unwrap();
+        assert_eq!(result.raw_classes.len(), 1);
+        assert_eq!(result.raw_classes[0].name, "Customer");
+        assert_eq!(result.raw_classes[0].module, "myapp.domain");
+    }
+
+    #[test]
+    fn test_parse_source_empty_source_should_return_empty_vecs() {
+        let result = parse_source(b"", "myapp.domain").unwrap();
+        assert!(result.module_deps.is_empty());
+        assert!(result.raw_classes.is_empty());
     }
 
     // --- Integration tests on the public extract() function ---
