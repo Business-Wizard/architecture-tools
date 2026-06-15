@@ -48,6 +48,11 @@ repos:
         language: system
         entry: cargo test --workspace
         pass_filenames: false
+      - id: no-mod-rs
+        name: no_mod_rs
+        language: pygrep
+        entry: 'mod\.rs$'
+        types: [file]
       - id: commit-msg-length
         name: commit-msg-length
         stages: [commit-msg]
