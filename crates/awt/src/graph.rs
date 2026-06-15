@@ -1,7 +1,5 @@
 pub mod architecture_graph_builder;
-pub mod coupling_graph;
 pub mod metrics;
-pub mod object_graph;
 mod rules;
 pub mod violations;
 

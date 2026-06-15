@@ -8,8 +8,6 @@ use architecture_core::model::{
 use camino::Utf8PathBuf;
 use lang_core::{ClassDef, ModuleDep};
 
-use crate::graph::coupling_graph::FileRole;
-
 type ObjectIndex = (
     BTreeMap<ObjectId, CodeObject>,
     HashMap<String, ObjectId>,
@@ -195,7 +193,7 @@ fn assemble_modules(
     for (file, &mid) in file_to_module_id {
         let name = path_to_module_name(file);
         let object_ids = module_object_ids.remove(&mid).unwrap_or_default();
-        let module = if FileRole::from_path(file) == FileRole::Test {
+        let module = if is_test_path(file) {
             Module::Test {
                 id: mid,
                 name: QualifiedName(name),
@@ -237,6 +235,16 @@ fn object_kind_from_bases(bases: &[String]) -> ObjectKind {
         }
     }
     ObjectKind::Type(TypeKind::Class)
+}
+
+fn is_test_path(path: &Utf8PathBuf) -> bool {
+    let s = path.as_str();
+    s.contains("/tests/")
+        || s.contains("/test_")
+        || s.ends_with("_test.py")
+        || s.ends_with("_test.rs")
+        || s.starts_with("tests/")
+        || s.starts_with("test_")
 }
 
 fn path_to_module_name(file: &Utf8PathBuf) -> String {

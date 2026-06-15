@@ -2,10 +2,7 @@ use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand, ValueEnum};
 use ignore::WalkBuilder;
 
-use crate::graph::{
-    architecture_graph_builder::ArchitectureGraphBuilder, coupling_graph::GraphIndex, metrics,
-    object_graph::ObjectGraphIndex,
-};
+use crate::graph::{architecture_graph_builder::ArchitectureGraphBuilder, metrics};
 use crate::report::{dot, objects_dot, sdp_flow, terminal};
 
 #[derive(Parser)]
@@ -130,14 +127,11 @@ fn run_inspect_command(args: &InspectArgs) {
                 vec![]
             };
 
-            let graph_idx =
-                GraphIndex::build_from_module_deps(&module_deps, &source_files, namer.as_ref());
-
-            if let Err(e) = dot::write_dot(&graph_idx, &metrics_result, args.dot_out.as_path()) {
+            if let Err(e) = dot::write_dot(&arch_graph, &metrics_result, args.dot_out.as_path()) {
                 eprintln!("warning: could not write dot output: {e}");
             }
             if let Err(e) =
-                sdp_flow::write_sdp_flow(&graph_idx, &metrics_result, args.sdp_out.as_path())
+                sdp_flow::write_sdp_flow(&arch_graph, &metrics_result, args.sdp_out.as_path())
             {
                 eprintln!("warning: could not write SDP flow chart: {e}");
             }
@@ -148,10 +142,9 @@ fn run_inspect_command(args: &InspectArgs) {
                     args.path
                 );
             } else {
-                let obj_idx = ObjectGraphIndex::build_from_class_defs(&class_defs);
-                let cycle_modules = dot::cycle_module_names(&graph_idx);
+                let cycle_modules = dot::cycle_module_names(&arch_graph);
                 if let Err(e) = objects_dot::write_objects_dot(
-                    &obj_idx,
+                    &arch_graph,
                     &cycle_modules,
                     args.objects_out.as_path(),
                 ) {

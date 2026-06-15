@@ -8,7 +8,8 @@ use plotters::prelude::{
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 use plotters::style::{Color, IntoFont};
 
-use crate::graph::coupling_graph::{FileRole, GraphIndex};
+use architecture_core::model::ArchitectureGraph;
+
 use crate::graph::metrics::{
     Dependency, Depender, INSTABILITY_EPSILON, Instability, MetricsResult, violates_sdp,
 };
@@ -130,35 +131,43 @@ fn sort_edges(edges: &mut [SdpEdge], order: EdgeOrder) {
     }
 }
 
-fn collect_edges(idx: &GraphIndex, metrics: &MetricsResult, order: EdgeOrder) -> Vec<SdpEdge> {
+fn collect_edges(
+    graph: &ArchitectureGraph,
+    metrics: &MetricsResult,
+    order: EdgeOrder,
+) -> Vec<SdpEdge> {
     let instability_map: HashMap<_, Instability> = metrics
         .nodes
         .iter()
-        .map(|n| (&n.file, n.instability))
+        .map(|n| (n.file.as_path(), n.instability))
         .collect();
 
-    let mut edges: Vec<SdpEdge> = idx
-        .graph
-        .edge_indices()
+    // Deduplicate edges by (from, to) — repeated ModuleEdge pairs have identical instability
+    let mut seen = std::collections::HashSet::new();
+    let mut edges: Vec<SdpEdge> = graph
+        .module_edges
+        .iter()
         .filter_map(|e| {
-            let (src, dst) = idx.graph.edge_endpoints(e).unwrap();
-            let src_node = &idx.graph[src];
-            let dst_node = &idx.graph[dst];
-            if src_node.role != FileRole::Source || dst_node.role != FileRole::Source {
+            let from_mod = graph.modules.get(&e.from)?;
+            let to_mod = graph.modules.get(&e.to)?;
+            if from_mod.is_test() || to_mod.is_test() {
                 return None;
             }
-            // Graph edge (src→dst) means "mutating src broke dst", so dst depends on src.
-            let i_dependency = *instability_map.get(&src_node.path)?;
-            let i_depender = *instability_map.get(&dst_node.path)?;
-            let depender_label = dst_node
-                .path
+            if !seen.insert((e.from, e.to)) {
+                return None;
+            }
+            // ModuleEdge { from: importer/depender, to: dependency }
+            let i_depender = *instability_map.get(from_mod.file_path())?;
+            let i_dependency = *instability_map.get(to_mod.file_path())?;
+            let depender_label = from_mod
+                .file_path()
                 .file_stem()
-                .unwrap_or(dst_node.path.as_str())
+                .unwrap_or(from_mod.file_path().as_str())
                 .to_owned();
-            let dependency_label = src_node
-                .path
+            let dependency_label = to_mod
+                .file_path()
                 .file_stem()
-                .unwrap_or(src_node.path.as_str())
+                .unwrap_or(to_mod.file_path().as_str())
                 .to_owned();
             Some(SdpEdge::from_coupling_edge(
                 Dependency(i_dependency),
@@ -321,11 +330,11 @@ fn render_sdp_flow(edges: &[SdpEdge], path: &Utf8Path) -> io::Result<()> {
 /// # Errors
 /// Returns `io::Error` if the PNG file cannot be written or rendered.
 pub fn write_sdp_flow(
-    idx: &GraphIndex,
+    graph: &ArchitectureGraph,
     metrics: &MetricsResult,
     path: &Utf8Path,
 ) -> io::Result<()> {
-    let edges = collect_edges(idx, metrics, EdgeOrder::default());
+    let edges = collect_edges(graph, metrics, EdgeOrder::default());
     render_sdp_flow(&edges, path)
 }
 
@@ -338,7 +347,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode};
     use crate::graph::metrics;
     use camino::Utf8PathBuf;
     use tempfile::NamedTempFile;
@@ -413,59 +421,7 @@ mod tests {
         }
     }
 
-    fn source_source_graph(src: &str, dst: &str) -> GraphIndex {
-        let src_stem = std::path::Path::new(src)
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned();
-        let dst_stem = std::path::Path::new(dst)
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned();
-        let files = vec![Utf8PathBuf::from(src), Utf8PathBuf::from(dst)];
-        let deps = vec![lang_core::ModuleDep {
-            from: src_stem.into(),
-            to: dst_stem.into(),
-        }];
-        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
-    }
-
-    fn source_test_graph() -> GraphIndex {
-        let files = vec![
-            Utf8PathBuf::from("domain.py"),
-            Utf8PathBuf::from("test_domain.py"),
-        ];
-        let deps = vec![lang_core::ModuleDep {
-            from: "test_domain".into(),
-            to: "domain".into(),
-        }];
-        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
-    }
-
-    fn make_large_graph(n: usize) -> (GraphIndex, ArchitectureGraph) {
-        let mut graph = CouplingGraph::new();
-        let mut coupling_nodes = vec![];
-        for i in 0..n {
-            let path = Utf8PathBuf::from(format!("src/mod{i}.py"));
-            let ni = graph.add_node(CouplingNode {
-                path,
-                role: FileRole::Source,
-            });
-            coupling_nodes.push(ni);
-        }
-        for i in 0..n - 1 {
-            graph.add_edge(
-                coupling_nodes[i],
-                coupling_nodes[i + 1],
-                CouplingEdge { failure_count: 1 },
-            );
-        }
-        let idx = GraphIndex { graph };
-
+    fn make_large_graph(n: usize) -> ArchitectureGraph {
         let mut modules = BTreeMap::new();
         let mut module_edges = vec![];
         for i in 0..n {
@@ -486,14 +442,12 @@ mod tests {
                 to: ModuleId(u32::try_from(i + 1).expect("fits u32")),
             });
         }
-        let arch = ArchitectureGraph {
+        ArchitectureGraph {
             modules,
             objects: BTreeMap::new(),
             dependencies: vec![],
             module_edges,
-        };
-
-        (idx, arch)
+        }
     }
 
     #[test]
@@ -520,35 +474,35 @@ mod tests {
 
     #[test]
     fn test_collect_edges_should_return_one_edge_for_single_dependency() {
-        let idx = source_source_graph("src/a.py", "src/b.py");
-        let m = stub_metrics(&arch_source_source_graph("src/a.py", "src/b.py"));
-        let edges = collect_edges(&idx, &m, EdgeOrder::default());
+        let graph = arch_source_source_graph("src/a.py", "src/b.py");
+        let m = stub_metrics(&graph);
+        let edges = collect_edges(&graph, &m, EdgeOrder::default());
         assert_eq!(edges.len(), 1);
     }
 
     #[test]
     fn test_collect_edges_should_exclude_test_nodes() {
-        let idx = source_test_graph();
-        let m = stub_metrics(&arch_source_test_graph());
-        let edges = collect_edges(&idx, &m, EdgeOrder::default());
+        let graph = arch_source_test_graph();
+        let m = stub_metrics(&graph);
+        let edges = collect_edges(&graph, &m, EdgeOrder::default());
         assert_eq!(edges.len(), 0);
     }
 
     #[test]
     fn test_collect_edges_should_exclude_edges_with_missing_metrics() {
-        let idx = source_source_graph("src/a.py", "src/b.py");
+        let graph = arch_source_source_graph("src/a.py", "src/b.py");
         let empty = MetricsResult { nodes: vec![] };
-        let edges = collect_edges(&idx, &empty, EdgeOrder::default());
+        let edges = collect_edges(&graph, &empty, EdgeOrder::default());
         assert_eq!(edges.len(), 0);
     }
 
     #[test]
     fn test_collect_edges_should_have_instability_values_in_unit_range() {
         // b→a: b has fan_out=1 (I=1.0), a has fan_in=1 (I=0.0).
-        // In SDP terms: a depends on b → depender=a (I=1.0), dependency=b (I=0.0).
-        let idx = source_source_graph("src/b.py", "src/a.py");
-        let m = stub_metrics(&arch_source_source_graph("src/b.py", "src/a.py"));
-        let edges = collect_edges(&idx, &m, EdgeOrder::default());
+        // In SDP terms: b imports a → depender=b (I=1.0), dependency=a (I=0.0).
+        let graph = arch_source_source_graph("src/b.py", "src/a.py");
+        let m = stub_metrics(&graph);
+        let edges = collect_edges(&graph, &m, EdgeOrder::default());
         assert_eq!(edges.len(), 1);
         assert!((0.0..=1.0).contains(&edges[0].depender.0.as_f64()));
         assert!((0.0..=1.0).contains(&edges[0].dependency.0.as_f64()));
@@ -558,9 +512,9 @@ mod tests {
     fn test_write_sdp_flow_with_valid_edges_should_produce_png_file() {
         let tmp = NamedTempFile::with_suffix(".png").unwrap();
         let path = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
-        let idx = source_source_graph("src/domain.py", "src/service.py");
-        let m = stub_metrics(&arch_source_source_graph("src/domain.py", "src/service.py"));
-        let result = write_sdp_flow(&idx, &m, path.as_path());
+        let graph = arch_source_source_graph("src/domain.py", "src/service.py");
+        let m = stub_metrics(&graph);
+        let result = write_sdp_flow(&graph, &m, path.as_path());
         assert!(result.is_ok());
         assert!(std::fs::metadata(tmp.path()).unwrap().len() > 0);
     }
@@ -569,15 +523,14 @@ mod tests {
     fn test_write_sdp_flow_with_no_edges_should_produce_valid_empty_chart() {
         let tmp = NamedTempFile::with_suffix(".png").unwrap();
         let path = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
-        let idx = GraphIndex::build_from_module_deps(&[], &[], &py_analyzer::PythonAnalyzer);
-        let arch = ArchitectureGraph {
+        let graph = ArchitectureGraph {
             modules: BTreeMap::new(),
             objects: BTreeMap::new(),
             dependencies: vec![],
             module_edges: vec![],
         };
-        let m = stub_metrics(&arch);
-        let result = write_sdp_flow(&idx, &m, path.as_path());
+        let m = stub_metrics(&graph);
+        let result = write_sdp_flow(&graph, &m, path.as_path());
         assert!(result.is_ok());
     }
 
@@ -585,9 +538,9 @@ mod tests {
     fn test_write_sdp_flow_with_many_edges_should_cap_at_max_rows() {
         let tmp = NamedTempFile::with_suffix(".png").unwrap();
         let path = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
-        let (idx, arch) = make_large_graph(MAX_ROWS + 5);
-        let m = stub_metrics(&arch);
-        let result = write_sdp_flow(&idx, &m, path.as_path());
+        let graph = make_large_graph(MAX_ROWS + 5);
+        let m = stub_metrics(&graph);
+        let result = write_sdp_flow(&graph, &m, path.as_path());
         assert!(result.is_ok());
     }
 

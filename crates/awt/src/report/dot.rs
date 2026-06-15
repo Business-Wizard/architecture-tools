@@ -4,32 +4,57 @@ use std::io;
 
 use camino::Utf8Path;
 use petgraph::algo::tarjan_scc;
-use petgraph::graph::NodeIndex;
+use petgraph::graph::DiGraph;
 
-use crate::graph::coupling_graph::{FileRole, GraphIndex};
+use architecture_core::model::{ArchitectureGraph, ModuleId};
+
 use crate::graph::metrics::MetricsResult;
 
-pub fn write_dot(idx: &GraphIndex, metrics: &MetricsResult, path: &Utf8Path) -> io::Result<()> {
-    let dot = render(idx, metrics);
+pub fn write_dot(
+    graph: &ArchitectureGraph,
+    metrics: &MetricsResult,
+    path: &Utf8Path,
+) -> io::Result<()> {
+    let dot = render(graph, metrics);
     std::fs::write(path.as_std_path(), dot)
 }
 
-fn cycle_nodes(idx: &GraphIndex) -> HashSet<NodeIndex> {
-    tarjan_scc(&idx.graph)
+fn cycle_module_ids(graph: &ArchitectureGraph) -> HashSet<ModuleId> {
+    let source_ids: Vec<ModuleId> = graph
+        .modules
+        .values()
+        .filter(|m| !m.is_test())
+        .map(architecture_core::model::Module::id)
+        .collect();
+
+    let mut pg: DiGraph<ModuleId, ()> = DiGraph::new();
+    let mut id_to_ni = HashMap::new();
+    for &mid in &source_ids {
+        let ni = pg.add_node(mid);
+        id_to_ni.insert(mid, ni);
+    }
+    for e in &graph.module_edges {
+        if let (Some(&s), Some(&d)) = (id_to_ni.get(&e.from), id_to_ni.get(&e.to))
+            && e.from != e.to
+        {
+            pg.add_edge(s, d, ());
+        }
+    }
+    tarjan_scc(&pg)
         .into_iter()
         .filter(|scc| scc.len() > 1)
         .flatten()
+        .map(|ni| pg[ni])
         .collect()
 }
 
 /// Returns the set of module name prefixes (directory stems) for all files in a coupling cycle.
 /// Used to cross-highlight object nodes whose containing module participates in a file-level cycle.
-pub fn cycle_module_names(idx: &GraphIndex) -> HashSet<String> {
-    cycle_nodes(idx)
+pub fn cycle_module_names(graph: &ArchitectureGraph) -> HashSet<String> {
+    cycle_module_ids(graph)
         .into_iter()
-        .filter_map(|n| {
-            let path = &idx.graph[n].path;
-            // Use the immediate parent directory as the module stem.
+        .filter_map(|mid| {
+            let path = graph.modules.get(&mid)?.file_path();
             path.parent().map(|p| p.as_str().replace('/', "."))
         })
         .collect()
@@ -37,63 +62,77 @@ pub fn cycle_module_names(idx: &GraphIndex) -> HashSet<String> {
 
 fn penwidth(count: usize) -> f32 {
     // 1.0 at count=1, grows with sqrt to avoid runaway thickness
-    // failure_count is always small in practice; cap to avoid any precision concern
+    // count is always small in practice; cap to avoid any precision concern
     let capped = u32::try_from(count).unwrap_or(u32::MAX);
     1.0_f32 + f32::from(u16::try_from(capped).unwrap_or(u16::MAX)).sqrt()
 }
 
-fn render(idx: &GraphIndex, metrics: &MetricsResult) -> String {
-    let cycles = cycle_nodes(idx);
-    let source_nodes: HashSet<NodeIndex> = idx
-        .graph
-        .node_indices()
-        .filter(|&n| idx.graph[n].role == FileRole::Source)
+fn render(graph: &ArchitectureGraph, metrics: &MetricsResult) -> String {
+    let cycles = cycle_module_ids(graph);
+
+    let source_ids: HashSet<ModuleId> = graph
+        .modules
+        .values()
+        .filter(|m| !m.is_test())
+        .map(architecture_core::model::Module::id)
         .collect();
 
     let instability_map: HashMap<_, f64> = metrics
         .nodes
         .iter()
-        .map(|n| (&n.file, n.instability.as_f64()))
+        .map(|n| (n.file.as_path(), n.instability.as_f64()))
         .collect();
+
+    // Count how many times each ModuleId appears as an endpoint (source modules only)
+    let mut endpoint_count: HashMap<ModuleId, usize> = HashMap::new();
+    let mut edge_counts: HashMap<(ModuleId, ModuleId), usize> = HashMap::new();
+    for e in &graph.module_edges {
+        if !source_ids.contains(&e.from) || !source_ids.contains(&e.to) {
+            continue;
+        }
+        *endpoint_count.entry(e.from).or_insert(0) += 1;
+        *endpoint_count.entry(e.to).or_insert(0) += 1;
+        *edge_counts.entry((e.from, e.to)).or_insert(0) += 1;
+    }
 
     let mut out = String::new();
     writeln!(out, "digraph coupling {{").unwrap();
     writeln!(out, "    rankdir=RL;").unwrap();
 
-    for &n in &source_nodes {
-        let node = &idx.graph[n];
-        let i = instability_map.get(&node.path).copied().unwrap_or(0.0);
-        let label = format!("{}\\nI={:.2}", node.path.as_str().replace('"', "\\\""), i);
-        let is_isolated = idx.graph.edges(n).count() == 0
-            && idx
-                .graph
-                .edges_directed(n, petgraph::Direction::Incoming)
-                .count()
-                == 0;
-        let attrs = if cycles.contains(&n) {
+    // Iterate in stable BTreeMap order for deterministic output
+    for module in graph.modules.values() {
+        if module.is_test() {
+            continue;
+        }
+        let mid = module.id();
+        let i = instability_map
+            .get(module.file_path())
+            .copied()
+            .unwrap_or(0.0);
+        let label = format!(
+            "{}\\nI={:.2}",
+            module.file_path().as_str().replace('"', "\\\""),
+            i
+        );
+        let is_isolated = endpoint_count.get(&mid).copied().unwrap_or(0) == 0;
+        let attrs = if cycles.contains(&mid) {
             "shape=box style=filled fillcolor=lightcoral"
         } else if is_isolated {
             "shape=box style=filled fillcolor=yellow"
         } else {
             "shape=box"
         };
-        writeln!(out, "    {} [{attrs} label=\"{label}\"];", n.index()).unwrap();
+        writeln!(out, "    {} [{attrs} label=\"{label}\"];", mid.0).unwrap();
     }
 
-    for e in idx.graph.edge_indices() {
-        let (src, dst) = idx.graph.edge_endpoints(e).unwrap();
-        if !source_nodes.contains(&src) || !source_nodes.contains(&dst) {
-            continue;
-        }
-        let count = idx.graph[e].failure_count;
-        let pw = penwidth(count);
-        let cycle_edge = cycles.contains(&src) && cycles.contains(&dst);
+    for ((from, to), count) in &edge_counts {
+        let pw = penwidth(*count);
+        let cycle_edge = cycles.contains(from) && cycles.contains(to);
         let color_attr = if cycle_edge { " color=crimson" } else { "" };
         writeln!(
             out,
             "    {} -> {} [label=\"{count}\" penwidth={pw:.2}{color_attr}];",
-            dst.index(),
-            src.index()
+            from.0, to.0
         )
         .unwrap();
     }
@@ -111,10 +150,8 @@ mod tests {
     };
 
     use super::*;
-    use crate::graph::coupling_graph::GraphIndex;
     use crate::graph::metrics;
     use camino::Utf8PathBuf;
-    use lang_core::ModuleDep;
 
     fn stub_metrics(graph: &ArchitectureGraph) -> MetricsResult {
         metrics::compute(graph)
@@ -153,7 +190,59 @@ mod tests {
         }
     }
 
-    fn node_index_in_dot(dot: &str, filename: &str) -> Option<usize> {
+    fn arch_with_test_module(
+        source_pairs: &[(&str, &str)],
+        test_names: &[&str],
+        test_pairs: &[(&str, &str)],
+    ) -> ArchitectureGraph {
+        use std::collections::BTreeSet as Set;
+        let all_names: Set<&str> = source_pairs
+            .iter()
+            .flat_map(|(a, b)| [*a, *b])
+            .chain(test_names.iter().copied())
+            .chain(test_pairs.iter().flat_map(|(a, b)| [*a, *b]))
+            .collect();
+
+        let test_set: HashSet<&str> = test_names.iter().copied().collect();
+        let mut name_to_id: BTreeMap<&str, ModuleId> = BTreeMap::new();
+        let mut modules = BTreeMap::new();
+        for (next_id, &name) in all_names.iter().enumerate() {
+            let id = ModuleId(u32::try_from(next_id).expect("fits u32"));
+            name_to_id.insert(name, id);
+            let module = if test_set.contains(name) {
+                Module::Test {
+                    id,
+                    name: QualifiedName(name.to_owned()),
+                    file_path: format!("{name}.py").into(),
+                    object_ids: BTreeSet::new(),
+                }
+            } else {
+                Module::Source {
+                    id,
+                    name: QualifiedName(name.to_owned()),
+                    file_path: format!("{name}.py").into(),
+                    object_ids: BTreeSet::new(),
+                }
+            };
+            modules.insert(id, module);
+        }
+        let module_edges = source_pairs
+            .iter()
+            .chain(test_pairs.iter())
+            .map(|(f, t)| ModuleEdge {
+                from: name_to_id[f],
+                to: name_to_id[t],
+            })
+            .collect();
+        ArchitectureGraph {
+            modules,
+            objects: BTreeMap::new(),
+            dependencies: vec![],
+            module_edges,
+        }
+    }
+
+    fn node_index_in_dot(dot: &str, filename: &str) -> Option<u32> {
         for line in dot.lines() {
             let trimmed = line.trim();
             if trimmed.contains(&format!("label=\"{filename}")) {
@@ -167,158 +256,89 @@ mod tests {
     }
 
     /// domain.py imports service.py
-    /// service: `fan_in=1`, `fan_out=0` → I=0.00 (stable)
-    /// domain:  `fan_in=0`, `fan_out=1` → I=1.00 (unstable)
-    fn fixture_one_import() -> GraphIndex {
-        let files = vec![
-            Utf8PathBuf::from("domain.py"),
-            Utf8PathBuf::from("service.py"),
-        ];
-        let deps = vec![ModuleDep {
-            from: "domain".into(),
-            to: "service".into(),
-        }];
-        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
+    fn fixture_one_import() -> ArchitectureGraph {
+        arch_from_pairs(&[("domain", "service")])
     }
 
     /// `test_domain.py` imports domain.py — test node should be excluded from output
-    fn fixture_test_imports_source() -> GraphIndex {
-        let files = vec![
-            Utf8PathBuf::from("domain.py"),
-            Utf8PathBuf::from("test_domain.py"),
-        ];
-        let deps = vec![ModuleDep {
-            from: "test_domain".into(),
-            to: "domain".into(),
-        }];
-        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
+    fn fixture_test_imports_source() -> ArchitectureGraph {
+        arch_with_test_module(&[], &["test_domain"], &[("test_domain", "domain")])
     }
 
     /// a.py and b.py mutually import each other → cycle
-    fn fixture_cycle() -> GraphIndex {
-        let files = vec![Utf8PathBuf::from("a.py"), Utf8PathBuf::from("b.py")];
-        let deps = vec![
-            ModuleDep {
-                from: "a".into(),
-                to: "b".into(),
-            },
-            ModuleDep {
-                from: "b".into(),
-                to: "a".into(),
-            },
-        ];
-        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
+    fn fixture_cycle() -> ArchitectureGraph {
+        arch_from_pairs(&[("a", "b"), ("b", "a")])
     }
 
     /// balanced.py imports domain.py; service.py imports balanced.py
-    /// balanced: `fan_in=1`, `fan_out=1` → I=0.50
-    fn fixture_balanced_node() -> GraphIndex {
-        let files = vec![
-            Utf8PathBuf::from("domain.py"),
-            Utf8PathBuf::from("balanced.py"),
-            Utf8PathBuf::from("service.py"),
-        ];
-        let deps = vec![
-            ModuleDep {
-                from: "balanced".into(),
-                to: "domain".into(),
-            },
-            ModuleDep {
-                from: "service".into(),
-                to: "balanced".into(),
-            },
-        ];
-        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
+    fn fixture_balanced_node() -> ArchitectureGraph {
+        arch_from_pairs(&[("balanced", "domain"), ("service", "balanced")])
     }
 
     /// hub.py imported by a, b, c; hub imports x, y
-    /// hub: `fan_in=3`, `fan_out=2` → I=2/5=0.40
-    fn fixture_hub_node() -> GraphIndex {
-        let files = vec![
-            Utf8PathBuf::from("x.py"),
-            Utf8PathBuf::from("y.py"),
-            Utf8PathBuf::from("hub.py"),
-            Utf8PathBuf::from("a.py"),
-            Utf8PathBuf::from("b.py"),
-            Utf8PathBuf::from("c.py"),
-        ];
-        let deps = vec![
-            ModuleDep {
-                from: "hub".into(),
-                to: "x".into(),
-            },
-            ModuleDep {
-                from: "hub".into(),
-                to: "y".into(),
-            },
-            ModuleDep {
-                from: "a".into(),
-                to: "hub".into(),
-            },
-            ModuleDep {
-                from: "b".into(),
-                to: "hub".into(),
-            },
-            ModuleDep {
-                from: "c".into(),
-                to: "hub".into(),
-            },
-        ];
-        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
+    fn fixture_hub_node() -> ArchitectureGraph {
+        arch_from_pairs(&[
+            ("hub", "x"),
+            ("hub", "y"),
+            ("a", "hub"),
+            ("b", "hub"),
+            ("c", "hub"),
+        ])
     }
 
     /// mid.py imported by consumer; mid imports x, y
-    /// mid: `fan_in=1`, `fan_out=2` → I=2/3≈0.67
-    fn fixture_mid_node() -> GraphIndex {
-        let files = vec![
-            Utf8PathBuf::from("x.py"),
-            Utf8PathBuf::from("y.py"),
-            Utf8PathBuf::from("mid.py"),
-            Utf8PathBuf::from("consumer.py"),
-        ];
-        let deps = vec![
-            ModuleDep {
-                from: "mid".into(),
-                to: "x".into(),
-            },
-            ModuleDep {
-                from: "mid".into(),
-                to: "y".into(),
-            },
-            ModuleDep {
-                from: "consumer".into(),
-                to: "mid".into(),
-            },
-        ];
-        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
+    fn fixture_mid_node() -> ArchitectureGraph {
+        arch_from_pairs(&[("mid", "x"), ("mid", "y"), ("consumer", "mid")])
     }
 
     /// consumer imports hub 4 times (e.g. different named imports resolving to same file)
-    /// edge count=4 → penwidth = 1.0 + sqrt(4) = 3.00
-    fn fixture_repeated_import() -> GraphIndex {
-        let files = vec![
-            Utf8PathBuf::from("hub.py"),
-            Utf8PathBuf::from("consumer.py"),
+    fn fixture_repeated_import() -> ArchitectureGraph {
+        use std::collections::BTreeSet;
+        let mut modules = BTreeMap::new();
+        let hub_id = ModuleId(0);
+        let consumer_id = ModuleId(1);
+        modules.insert(
+            hub_id,
+            Module::Source {
+                id: hub_id,
+                name: QualifiedName("hub".into()),
+                file_path: Utf8PathBuf::from("hub.py"),
+                object_ids: BTreeSet::new(),
+            },
+        );
+        modules.insert(
+            consumer_id,
+            Module::Source {
+                id: consumer_id,
+                name: QualifiedName("consumer".into()),
+                file_path: Utf8PathBuf::from("consumer.py"),
+                object_ids: BTreeSet::new(),
+            },
+        );
+        let module_edges = vec![
+            ModuleEdge {
+                from: consumer_id,
+                to: hub_id,
+            },
+            ModuleEdge {
+                from: consumer_id,
+                to: hub_id,
+            },
+            ModuleEdge {
+                from: consumer_id,
+                to: hub_id,
+            },
+            ModuleEdge {
+                from: consumer_id,
+                to: hub_id,
+            },
         ];
-        let deps = vec![
-            ModuleDep {
-                from: "consumer".into(),
-                to: "hub".into(),
-            },
-            ModuleDep {
-                from: "consumer".into(),
-                to: "hub".into(),
-            },
-            ModuleDep {
-                from: "consumer".into(),
-                to: "hub".into(),
-            },
-            ModuleDep {
-                from: "consumer".into(),
-                to: "hub".into(),
-            },
-        ];
-        GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
+        ArchitectureGraph {
+            modules,
+            objects: BTreeMap::new(),
+            dependencies: vec![],
+            module_edges,
+        }
     }
 
     // ── penwidth ─────────────────────────────────────────────────────────────
@@ -340,15 +360,15 @@ mod tests {
 
     #[test]
     fn test_cycle_edges_should_get_crimson_color() {
-        let idx = fixture_cycle();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_cycle();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.contains("color=crimson"));
     }
 
     #[test]
     fn test_non_cycle_edges_should_not_get_crimson_color() {
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(!dot.contains("color=crimson"));
     }
 
@@ -361,22 +381,22 @@ mod tests {
 
     #[test]
     fn test_render_should_open_with_digraph_coupling() {
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.starts_with("digraph coupling {"));
     }
 
     #[test]
     fn test_render_should_have_rankdir_rl() {
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.contains("rankdir=RL;"));
     }
 
     #[test]
     fn test_render_should_include_exactly_two_source_nodes() {
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert_eq!(dot.matches("[shape=box").count(), 2);
     }
 
@@ -384,17 +404,17 @@ mod tests {
 
     #[test]
     fn test_render_should_use_box_shape_for_source_nodes() {
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.contains("shape=box"));
     }
 
     #[test]
     fn test_render_stable_node_should_have_exact_label() {
         // domain imports service → fan_in(service)=1, fan_out(service)=0 → I=0.00
-        let idx = fixture_one_import();
+        let graph = fixture_one_import();
         let dot = render(
-            &idx,
+            &graph,
             &stub_metrics(&arch_from_pairs(&[("domain", "service")])),
         );
         assert!(dot.contains(r#"label="service.py\nI=0.00""#));
@@ -403,9 +423,9 @@ mod tests {
     #[test]
     fn test_render_unstable_node_should_have_exact_label() {
         // domain imports service → fan_in(domain)=0, fan_out(domain)=1 → I=1.00
-        let idx = fixture_one_import();
+        let graph = fixture_one_import();
         let dot = render(
-            &idx,
+            &graph,
             &stub_metrics(&arch_from_pairs(&[("domain", "service")])),
         );
         assert!(dot.contains(r#"label="domain.py\nI=1.00""#));
@@ -413,10 +433,9 @@ mod tests {
 
     #[test]
     fn test_render_balanced_node_should_have_instability_zero_point_five() {
-        // balanced imports domain; service imports balanced → fan_in=1, fan_out=1 → I=0.50
-        let idx = fixture_balanced_node();
+        let graph = fixture_balanced_node();
         let dot = render(
-            &idx,
+            &graph,
             &stub_metrics(&arch_from_pairs(&[
                 ("balanced", "domain"),
                 ("service", "balanced"),
@@ -427,10 +446,9 @@ mod tests {
 
     #[test]
     fn test_render_hub_node_should_have_instability_zero_point_four() {
-        // hub imports x,y; a,b,c import hub → fan_in=3, fan_out=2 → I=2/5=0.40
-        let idx = fixture_hub_node();
+        let graph = fixture_hub_node();
         let dot = render(
-            &idx,
+            &graph,
             &stub_metrics(&arch_from_pairs(&[
                 ("hub", "x"),
                 ("hub", "y"),
@@ -444,10 +462,9 @@ mod tests {
 
     #[test]
     fn test_render_mid_node_should_have_instability_zero_point_six_seven() {
-        // mid imports x,y; consumer imports mid → fan_in=1, fan_out=2 → I=2/3≈0.67
-        let idx = fixture_mid_node();
+        let graph = fixture_mid_node();
         let dot = render(
-            &idx,
+            &graph,
             &stub_metrics(&arch_from_pairs(&[
                 ("mid", "x"),
                 ("mid", "y"),
@@ -461,9 +478,9 @@ mod tests {
 
     #[test]
     fn test_render_edge_should_point_from_importer_to_dependency() {
-        // domain imports service → DOT arrow: domain_idx -> service_idx (not the reverse)
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        // domain imports service → DOT arrow: domain_id -> service_id
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         let domain_idx = node_index_in_dot(&dot, "domain.py").expect("domain.py node");
         let service_idx = node_index_in_dot(&dot, "service.py").expect("service.py node");
         assert!(dot.contains(&format!("{domain_idx} -> {service_idx}")));
@@ -472,32 +489,32 @@ mod tests {
 
     #[test]
     fn test_render_edge_should_show_failure_count_as_label() {
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.contains(r#"label="1""#));
     }
 
     #[test]
     fn test_render_edge_should_show_penwidth_for_single_import() {
         // count=1 → 1.0 + sqrt(1) = 2.00
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.contains("penwidth=2.00"));
     }
 
     #[test]
     fn test_render_edge_should_accumulate_count_for_repeated_imports() {
-        // 4 ModuleDep entries resolving to the same edge → count=4
-        let idx = fixture_repeated_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        // 4 ModuleEdge entries for the same pair → count=4
+        let graph = fixture_repeated_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.contains(r#"label="4""#));
     }
 
     #[test]
     fn test_render_edge_should_show_penwidth_for_repeated_imports() {
         // count=4 → 1.0 + sqrt(4) = 3.00
-        let idx = fixture_repeated_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_repeated_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.contains("penwidth=3.00"));
     }
 
@@ -505,15 +522,15 @@ mod tests {
 
     #[test]
     fn test_render_should_exclude_test_file_node_from_output() {
-        let idx = fixture_test_imports_source();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_test_imports_source();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(!dot.contains("test_domain.py"));
     }
 
     #[test]
     fn test_render_should_exclude_edge_involving_test_file() {
-        let idx = fixture_test_imports_source();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_test_imports_source();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(!dot.contains("->"));
     }
 
@@ -521,18 +538,37 @@ mod tests {
 
     #[test]
     fn test_render_isolated_source_node_should_get_yellow_fill() {
-        // orphan.py has no deps and nothing imports it.
-        let files = vec![
-            Utf8PathBuf::from("domain.py"),
-            Utf8PathBuf::from("service.py"),
-            Utf8PathBuf::from("orphan.py"),
-        ];
-        let deps = vec![ModuleDep {
-            from: "domain".into(),
-            to: "service".into(),
-        }];
-        let idx = GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer);
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        // orphan.py has no deps and nothing imports it
+        use std::collections::BTreeSet;
+        let domain_id = ModuleId(0);
+        let service_id = ModuleId(1);
+        let orphan_id = ModuleId(2);
+        let mut modules = BTreeMap::new();
+        for (id, name) in [
+            (domain_id, "domain"),
+            (service_id, "service"),
+            (orphan_id, "orphan"),
+        ] {
+            modules.insert(
+                id,
+                Module::Source {
+                    id,
+                    name: QualifiedName(name.into()),
+                    file_path: format!("{name}.py").into(),
+                    object_ids: BTreeSet::new(),
+                },
+            );
+        }
+        let graph = ArchitectureGraph {
+            modules,
+            objects: BTreeMap::new(),
+            dependencies: vec![],
+            module_edges: vec![ModuleEdge {
+                from: domain_id,
+                to: service_id,
+            }],
+        };
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(
             dot.contains("fillcolor=yellow"),
             "orphan node should be yellow:\n{dot}"
@@ -541,8 +577,8 @@ mod tests {
 
     #[test]
     fn test_render_connected_node_should_not_get_yellow_fill() {
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(!dot.contains("fillcolor=yellow"));
     }
 
@@ -550,15 +586,15 @@ mod tests {
 
     #[test]
     fn test_render_cycle_nodes_should_get_lightcoral_fill() {
-        let idx = fixture_cycle();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_cycle();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.contains("lightcoral"));
     }
 
     #[test]
     fn test_render_non_cycle_node_should_not_get_lightcoral_fill() {
-        let idx = fixture_one_import();
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = fixture_one_import();
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(!dot.contains("lightcoral"));
     }
 
@@ -566,16 +602,21 @@ mod tests {
 
     #[test]
     fn test_render_with_empty_metrics_should_not_panic() {
-        let idx = fixture_one_import();
+        let graph = fixture_one_import();
         let empty = MetricsResult { nodes: vec![] };
-        let dot = render(&idx, &empty);
+        let dot = render(&graph, &empty);
         assert!(dot.contains("digraph coupling {"));
     }
 
     #[test]
     fn test_render_empty_graph_should_produce_valid_dot() {
-        let idx = GraphIndex::build_from_module_deps(&[], &[], &py_analyzer::PythonAnalyzer);
-        let dot = render(&idx, &MetricsResult { nodes: vec![] });
+        let graph = ArchitectureGraph {
+            modules: BTreeMap::new(),
+            objects: BTreeMap::new(),
+            dependencies: vec![],
+            module_edges: vec![],
+        };
+        let dot = render(&graph, &MetricsResult { nodes: vec![] });
         assert!(dot.starts_with("digraph coupling {"));
         assert!(dot.trim_end().ends_with('}'));
         assert_eq!(dot.matches("[shape=box").count(), 0);
