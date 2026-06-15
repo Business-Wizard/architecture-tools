@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
+use camino::{Utf8Path, Utf8PathBuf};
+
 /// Unique identifier for a module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModuleId(pub u32);
@@ -183,11 +185,13 @@ pub enum Module {
     Source {
         id: ModuleId,
         name: QualifiedName,
+        file_path: Utf8PathBuf,
         object_ids: BTreeSet<ObjectId>,
     },
     Test {
         id: ModuleId,
         name: QualifiedName,
+        file_path: Utf8PathBuf,
         object_ids: BTreeSet<ObjectId>,
     },
 }
@@ -204,6 +208,13 @@ impl Module {
     pub fn name(&self) -> &QualifiedName {
         match self {
             Module::Source { name, .. } | Module::Test { name, .. } => name,
+        }
+    }
+
+    #[must_use]
+    pub fn file_path(&self) -> &Utf8Path {
+        match self {
+            Module::Source { file_path, .. } | Module::Test { file_path, .. } => file_path,
         }
     }
 

@@ -475,6 +475,7 @@ mod tests {
         Module::Source {
             id,
             name: QualifiedName(name.to_string()),
+            file_path: "src/stub.py".into(),
             object_ids: object_ids.into_iter().collect(),
         }
     }
@@ -483,6 +484,7 @@ mod tests {
         Module::Test {
             id,
             name: QualifiedName(name.to_string()),
+            file_path: "tests/stub_test.py".into(),
             object_ids: object_ids.into_iter().collect(),
         }
     }
