@@ -331,14 +331,86 @@ pub fn write_sdp_flow(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use architecture_core::model::{
+        ArchitectureGraph, Module, ModuleEdge, ModuleId, QualifiedName,
+    };
+
     use super::*;
     use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode};
     use crate::graph::metrics;
     use camino::Utf8PathBuf;
     use tempfile::NamedTempFile;
 
-    fn stub_metrics(idx: &GraphIndex) -> MetricsResult {
-        metrics::compute(idx)
+    fn stub_metrics(graph: &ArchitectureGraph) -> MetricsResult {
+        metrics::compute(graph)
+    }
+
+    fn arch_source_source_graph(src: &str, dst: &str) -> ArchitectureGraph {
+        let src_id = ModuleId(0);
+        let dst_id = ModuleId(1);
+        let mut modules = BTreeMap::new();
+        modules.insert(
+            src_id,
+            Module::Source {
+                id: src_id,
+                name: QualifiedName(src.to_owned()),
+                file_path: src.into(),
+                object_ids: BTreeSet::new(),
+            },
+        );
+        modules.insert(
+            dst_id,
+            Module::Source {
+                id: dst_id,
+                name: QualifiedName(dst.to_owned()),
+                file_path: dst.into(),
+                object_ids: BTreeSet::new(),
+            },
+        );
+        ArchitectureGraph {
+            modules,
+            objects: BTreeMap::new(),
+            dependencies: vec![],
+            module_edges: vec![ModuleEdge {
+                from: src_id,
+                to: dst_id,
+            }],
+        }
+    }
+
+    fn arch_source_test_graph() -> ArchitectureGraph {
+        let src_id = ModuleId(0);
+        let test_id = ModuleId(1);
+        let mut modules = BTreeMap::new();
+        modules.insert(
+            src_id,
+            Module::Source {
+                id: src_id,
+                name: QualifiedName("domain".to_owned()),
+                file_path: "domain.py".into(),
+                object_ids: BTreeSet::new(),
+            },
+        );
+        modules.insert(
+            test_id,
+            Module::Test {
+                id: test_id,
+                name: QualifiedName("test_domain".to_owned()),
+                file_path: "test_domain.py".into(),
+                object_ids: BTreeSet::new(),
+            },
+        );
+        ArchitectureGraph {
+            modules,
+            objects: BTreeMap::new(),
+            dependencies: vec![],
+            module_edges: vec![ModuleEdge {
+                from: test_id,
+                to: src_id,
+            }],
+        }
     }
 
     fn source_source_graph(src: &str, dst: &str) -> GraphIndex {
@@ -374,23 +446,54 @@ mod tests {
         GraphIndex::build_from_module_deps(&deps, &files, &py_analyzer::PythonAnalyzer)
     }
 
-    fn make_large_graph(n: usize) -> (GraphIndex, MetricsResult) {
+    fn make_large_graph(n: usize) -> (GraphIndex, ArchitectureGraph) {
         let mut graph = CouplingGraph::new();
-        let mut nodes = vec![];
+        let mut coupling_nodes = vec![];
         for i in 0..n {
             let path = Utf8PathBuf::from(format!("src/mod{i}.py"));
             let ni = graph.add_node(CouplingNode {
                 path,
                 role: FileRole::Source,
             });
-            nodes.push(ni);
+            coupling_nodes.push(ni);
         }
         for i in 0..n - 1 {
-            graph.add_edge(nodes[i], nodes[i + 1], CouplingEdge { failure_count: 1 });
+            graph.add_edge(
+                coupling_nodes[i],
+                coupling_nodes[i + 1],
+                CouplingEdge { failure_count: 1 },
+            );
         }
         let idx = GraphIndex { graph };
-        let m = stub_metrics(&idx);
-        (idx, m)
+
+        let mut modules = BTreeMap::new();
+        let mut module_edges = vec![];
+        for i in 0..n {
+            let mid = ModuleId(u32::try_from(i).expect("fits u32"));
+            modules.insert(
+                mid,
+                Module::Source {
+                    id: mid,
+                    name: QualifiedName(format!("mod{i}")),
+                    file_path: format!("src/mod{i}.py").into(),
+                    object_ids: BTreeSet::new(),
+                },
+            );
+        }
+        for i in 0..n - 1 {
+            module_edges.push(ModuleEdge {
+                from: ModuleId(u32::try_from(i).expect("fits u32")),
+                to: ModuleId(u32::try_from(i + 1).expect("fits u32")),
+            });
+        }
+        let arch = ArchitectureGraph {
+            modules,
+            objects: BTreeMap::new(),
+            dependencies: vec![],
+            module_edges,
+        };
+
+        (idx, arch)
     }
 
     #[test]
@@ -418,7 +521,7 @@ mod tests {
     #[test]
     fn test_collect_edges_should_return_one_edge_for_single_dependency() {
         let idx = source_source_graph("src/a.py", "src/b.py");
-        let m = stub_metrics(&idx);
+        let m = stub_metrics(&arch_source_source_graph("src/a.py", "src/b.py"));
         let edges = collect_edges(&idx, &m, EdgeOrder::default());
         assert_eq!(edges.len(), 1);
     }
@@ -426,7 +529,7 @@ mod tests {
     #[test]
     fn test_collect_edges_should_exclude_test_nodes() {
         let idx = source_test_graph();
-        let m = stub_metrics(&idx);
+        let m = stub_metrics(&arch_source_test_graph());
         let edges = collect_edges(&idx, &m, EdgeOrder::default());
         assert_eq!(edges.len(), 0);
     }
@@ -444,7 +547,7 @@ mod tests {
         // b→a: b has fan_out=1 (I=1.0), a has fan_in=1 (I=0.0).
         // In SDP terms: a depends on b → depender=a (I=1.0), dependency=b (I=0.0).
         let idx = source_source_graph("src/b.py", "src/a.py");
-        let m = stub_metrics(&idx);
+        let m = stub_metrics(&arch_source_source_graph("src/b.py", "src/a.py"));
         let edges = collect_edges(&idx, &m, EdgeOrder::default());
         assert_eq!(edges.len(), 1);
         assert!((0.0..=1.0).contains(&edges[0].depender.0.as_f64()));
@@ -456,7 +559,7 @@ mod tests {
         let tmp = NamedTempFile::with_suffix(".png").unwrap();
         let path = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
         let idx = source_source_graph("src/domain.py", "src/service.py");
-        let m = stub_metrics(&idx);
+        let m = stub_metrics(&arch_source_source_graph("src/domain.py", "src/service.py"));
         let result = write_sdp_flow(&idx, &m, path.as_path());
         assert!(result.is_ok());
         assert!(std::fs::metadata(tmp.path()).unwrap().len() > 0);
@@ -467,7 +570,13 @@ mod tests {
         let tmp = NamedTempFile::with_suffix(".png").unwrap();
         let path = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
         let idx = GraphIndex::build_from_module_deps(&[], &[], &py_analyzer::PythonAnalyzer);
-        let m = stub_metrics(&idx);
+        let arch = ArchitectureGraph {
+            modules: BTreeMap::new(),
+            objects: BTreeMap::new(),
+            dependencies: vec![],
+            module_edges: vec![],
+        };
+        let m = stub_metrics(&arch);
         let result = write_sdp_flow(&idx, &m, path.as_path());
         assert!(result.is_ok());
     }
@@ -476,7 +585,8 @@ mod tests {
     fn test_write_sdp_flow_with_many_edges_should_cap_at_max_rows() {
         let tmp = NamedTempFile::with_suffix(".png").unwrap();
         let path = Utf8PathBuf::try_from(tmp.path().to_path_buf()).unwrap();
-        let (idx, m) = make_large_graph(MAX_ROWS + 5);
+        let (idx, arch) = make_large_graph(MAX_ROWS + 5);
+        let m = stub_metrics(&arch);
         let result = write_sdp_flow(&idx, &m, path.as_path());
         assert!(result.is_ok());
     }

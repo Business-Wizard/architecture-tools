@@ -120,6 +120,8 @@ fn run_inspect_command(args: &InspectArgs) {
                 namer.as_ref(),
             );
 
+            let metrics_result = metrics::compute(&arch_graph);
+
             let violations = if args.violations {
                 let v = crate::graph::analyze(&arch_graph);
                 terminal::print_graph_violations_section(&v, &args.path);
@@ -130,7 +132,6 @@ fn run_inspect_command(args: &InspectArgs) {
 
             let graph_idx =
                 GraphIndex::build_from_module_deps(&module_deps, &source_files, namer.as_ref());
-            let metrics_result = metrics::compute(&graph_idx);
 
             if let Err(e) = dot::write_dot(&graph_idx, &metrics_result, args.dot_out.as_path()) {
                 eprintln!("warning: could not write dot output: {e}");

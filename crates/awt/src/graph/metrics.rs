@@ -1,7 +1,6 @@
 use camino::Utf8PathBuf;
-use petgraph::Direction;
 
-use crate::graph::coupling_graph::GraphIndex;
+use architecture_core::model::ArchitectureGraph;
 
 pub const INSTABILITY_EPSILON: f64 = 0.01;
 
@@ -45,29 +44,31 @@ pub struct MetricsResult {
     pub nodes: Vec<NodeMetrics>,
 }
 
-pub fn compute(idx: &GraphIndex) -> MetricsResult {
-    let nodes: Vec<NodeMetrics> = idx
-        .graph
-        .node_indices()
-        .map(|n| {
-            let node = &idx.graph[n];
-            // Coupling graph edge A→B means "mutating A broke B", i.e. B depends on A.
-            // Outgoing edges from A = things that depend on A = A's afferent coupling (fan-in).
-            // Incoming edges to A = things A depends on = A's efferent coupling (fan-out).
-            let fan_in = idx.graph.edges_directed(n, Direction::Outgoing).count();
-            let fan_out = idx.graph.edges_directed(n, Direction::Incoming).count();
-
-            // Isolated nodes (no edges) default to I=1.0: maximally unstable,
-            // avoiding false SDP violations.
+pub fn compute(graph: &ArchitectureGraph) -> MetricsResult {
+    let nodes: Vec<NodeMetrics> = graph
+        .modules
+        .values()
+        .filter(|m| !m.is_test())
+        .map(|module| {
+            let id = module.id();
+            let fan_out = graph
+                .module_edges
+                .iter()
+                .filter(|e| e.from == id && e.from != e.to)
+                .count();
+            let fan_in = graph
+                .module_edges
+                .iter()
+                .filter(|e| e.to == id && e.from != e.to)
+                .count();
             #[allow(clippy::cast_precision_loss)]
             let instability = Instability::new(if fan_in + fan_out == 0 {
                 1.0
             } else {
                 fan_out as f64 / (fan_in + fan_out) as f64
             });
-
             NodeMetrics {
-                file: node.path.clone(),
+                file: module.file_path().to_owned(),
                 instability,
             }
         })
@@ -79,41 +80,36 @@ pub fn compute(idx: &GraphIndex) -> MetricsResult {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::float_cmp)]
-    use super::*;
-    use crate::graph::coupling_graph::{CouplingEdge, CouplingGraph, CouplingNode, FileRole};
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
-    fn make_graph_index(edges: &[(&str, &str)]) -> GraphIndex {
-        let mut graph = CouplingGraph::new();
-        let mut map: HashMap<&str, petgraph::graph::NodeIndex> = HashMap::new();
-        for (src, dst) in edges {
-            let s = *map.entry(src).or_insert_with(|| {
-                graph.add_node(CouplingNode {
-                    path: Utf8PathBuf::from(*src),
-                    role: FileRole::Source,
-                })
-            });
-            let d = *map.entry(dst).or_insert_with(|| {
-                graph.add_node(CouplingNode {
-                    path: Utf8PathBuf::from(*dst),
-                    role: FileRole::Source,
-                })
-            });
-            graph.add_edge(s, d, CouplingEdge { failure_count: 1 });
+    use architecture_core::model::{Module, ModuleId, QualifiedName};
+
+    use super::*;
+    use crate::graph::rules::make_graph;
+
+    fn isolated_graph() -> ArchitectureGraph {
+        let id = ModuleId(0);
+        let mut modules = BTreeMap::new();
+        modules.insert(
+            id,
+            Module::Source {
+                id,
+                name: QualifiedName("isolated".to_owned()),
+                file_path: "src/isolated.py".into(),
+                object_ids: BTreeSet::new(),
+            },
+        );
+        ArchitectureGraph {
+            modules,
+            objects: BTreeMap::new(),
+            dependencies: vec![],
+            module_edges: vec![],
         }
-        GraphIndex { graph }
     }
 
     #[test]
     fn test_isolated_node_should_have_instability_one() {
-        let mut graph = CouplingGraph::new();
-        graph.add_node(CouplingNode {
-            path: Utf8PathBuf::from("src/isolated.py"),
-            role: FileRole::Source,
-        });
-        let idx = GraphIndex { graph };
-
-        let result = compute(&idx);
+        let result = compute(&isolated_graph());
 
         let isolated = result
             .nodes
@@ -126,36 +122,27 @@ mod tests {
 
     #[test]
     fn test_node_with_high_afferent_coupling_should_have_instability_zero() {
-        // hub→a and hub→b: a and b depend on hub.
-        // hub has high afferent coupling (many dependents) → I=0 (stable).
-        // a and b have no dependents and depend on hub → I=1 (unstable).
-        let idx = make_graph_index(&[("src/hub.py", "src/a.py"), ("src/hub.py", "src/b.py")]);
-        let result = compute(&idx);
+        // a imports hub, b imports hub → fan_in(hub)=2, fan_out(hub)=0 → I(hub)=0.0
+        let result = compute(&make_graph(&[("a", "hub"), ("b", "hub")]));
 
-        let a = result
+        let hub = result
             .nodes
             .iter()
-            .find(|n| n.file.as_str() == "src/a.py")
+            .find(|n| n.file.as_str() == "hub.py")
             .expect("node should exist");
 
-        assert_eq!(a.instability, Instability::new(1.0));
+        assert_eq!(hub.instability, Instability::new(0.0));
     }
 
     #[test]
     fn test_node_with_high_efferent_coupling_should_have_instability_one() {
-        // a→consumer and b→consumer: consumer depends on both a and b.
-        // consumer has no outgoing coupling edges → nothing depends on consumer → I=1 (unstable).
-        // a and b are depended on by consumer → a and b are stable (I=0).
-        let idx = make_graph_index(&[
-            ("src/a.py", "src/consumer.py"),
-            ("src/b.py", "src/consumer.py"),
-        ]);
-        let result = compute(&idx);
+        // consumer imports a and b → fan_in(a)=1, fan_out(a)=0 → I(a)=0.0
+        let result = compute(&make_graph(&[("consumer", "a"), ("consumer", "b")]));
 
         let a = result
             .nodes
             .iter()
-            .find(|n| n.file.as_str() == "src/a.py")
+            .find(|n| n.file.as_str() == "a.py")
             .expect("node should exist");
 
         assert_eq!(a.instability, Instability::new(0.0));
@@ -163,16 +150,13 @@ mod tests {
 
     #[test]
     fn test_balanced_node_should_have_instability_half() {
-        let idx = make_graph_index(&[
-            ("src/a.py", "src/balanced.py"),
-            ("src/balanced.py", "src/b.py"),
-        ]);
-        let result = compute(&idx);
+        // a imports balanced; balanced imports b → fan_in=1, fan_out=1 → I=0.5
+        let result = compute(&make_graph(&[("a", "balanced"), ("balanced", "b")]));
 
         let balanced = result
             .nodes
             .iter()
-            .find(|n| n.file.as_str() == "src/balanced.py")
+            .find(|n| n.file.as_str() == "balanced.py")
             .expect("node should exist");
 
         assert_eq!(balanced.instability, Instability::new(0.5));
