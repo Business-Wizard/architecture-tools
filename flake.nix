@@ -2,7 +2,7 @@
   description = "Development Environment";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/2a1d1900c5d04afe589da7ed16111a7418bcaf04"; # 2026-04-23
+    nixpkgs.url = "github:NixOS/nixpkgs/1f9a45d327c783996acc4690e83ff661fe1cf1b5"; # 2026-05-31
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
